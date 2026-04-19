@@ -75,9 +75,16 @@ function setLoading(isLoading, text = 'Загрузка…') {
   els.loadingOverlay.classList.toggle('hidden', !isLoading);
 }
 
+function normalizeUiErrorMessage(message) {
+  const text = String(message || '').trim();
+  if (!text) return 'Произошла ошибка';
+  if (text === 'Failed to fetch' || text === 'Load failed') return 'Ошибка сети или ответа сервера';
+  return text;
+}
+
 function showToast(message) {
   if (!message) return;
-  els.toast.textContent = message;
+  els.toast.textContent = normalizeUiErrorMessage(message);
   els.toast.classList.add('show');
   clearTimeout(showToast.timer);
   showToast.timer = setTimeout(() => {
@@ -396,10 +403,15 @@ function loadDayFromServer(payload) {
   renderAll();
 }
 
+async function refreshCurrentState(loadingText = 'Обновляем журнал…') {
+  const payload = await api('init', { date: state.date }, loadingText);
+  applyPayload(payload);
+  return payload;
+}
+
 async function loadInitial() {
   try {
-    const payload = await api('init', { date: state.date }, 'Загружаем журнал…');
-    applyPayload(payload);
+    await refreshCurrentState('Загружаем журнал…');
   } catch (error) {
     showToast(error.message || 'Не удалось загрузить журнал');
   }
@@ -413,6 +425,7 @@ async function saveJournal() {
       'Сохраняем журнал…'
     );
     applyPayload(payload);
+    await refreshCurrentState('Обновляем историю…');
     if (tg?.HapticFeedback) tg.HapticFeedback.notificationOccurred('success');
   } catch (error) {
     if (tg?.HapticFeedback) tg.HapticFeedback.notificationOccurred('error');
@@ -431,6 +444,7 @@ async function addStudent() {
     const payload = await api('addStudent', { name, date: state.date }, 'Добавляем ученика…');
     els.newStudentName.value = '';
     applyPayload(payload);
+    await refreshCurrentState('Обновляем список учеников…');
     state.activeTab = 'students';
     renderTabs();
   } catch (error) {
@@ -447,6 +461,7 @@ async function deleteStudent(studentId) {
   try {
     const payload = await api('deleteStudent', { studentId, date: state.date }, 'Удаляем ученика…');
     applyPayload(payload);
+    await refreshCurrentState('Обновляем список учеников…');
   } catch (error) {
     showToast(error.message || 'Не удалось удалить ученика');
   }
