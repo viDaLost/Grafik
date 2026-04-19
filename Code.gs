@@ -1,0 +1,608 @@
+const APP_CONFIG = {
+  SPREADSHEET_ID: '10bPN4_Ag0Y7KMwWm1mjb_9KCFJ4ktqqyrvm-6RGAnuQ',
+  ALLOWED_TELEGRAM_IDS: ['26156823', '1288379477'],
+  STUDENTS_SHEET: 'Ученики',
+  ATTENDANCE_SHEET: 'Посещения',
+  INITIAL_STUDENTS: [
+    'Агния',
+    'Алиса',
+    'Аннетта',
+    'Арслан',
+    'Артём',
+    'Вадим',
+    'Вереника',
+    'Вика',
+    'Виола',
+    'Вова',
+    'Глеб',
+    'Дарина',
+    'Диана (вн)',
+    'Диана (з.)',
+    'Доминика',
+    'Ева',
+    'Исмаил',
+    'Лана',
+    'Милослава',
+    'Неля',
+    'Нильс',
+    'Снежана',
+    'Таня',
+    'Тима (Ар.)',
+    'Тима (ом.)',
+    'Тинэтта'
+  ]
+};
+
+function doGet(e) {
+  try {
+    ensureSetup_();
+    const action = (e && e.parameter && e.parameter.action) || 'health';
+
+    if (action === 'health') {
+      return jsonResponse_({ ok: true, service: 'attendance-api', timestamp: new Date().toISOString() });
+    }
+
+    return jsonResponse_({ ok: false, error: 'Unknown GET action' });
+  } catch (error) {
+    return jsonResponse_({ ok: false, error: error.message, stack: error.stack });
+  }
+}
+
+function doPost(e) {
+  try {
+    ensureSetup_();
+
+    const payload = parseRequest_(e);
+    const action = payload.action;
+
+    if (!action) {
+      throw new Error('Не передано действие action');
+    }
+
+    const auth = validateTelegramRequest_(payload.initData || '');
+
+    switch (action) {
+      case 'init':
+        return jsonResponse_(buildInitPayload_(payload.date, auth.user));
+
+      case 'getDay':
+        return jsonResponse_({
+          ok: true,
+          date: normalizeDate_(payload.date),
+          records: getDayRecords_(payload.date),
+          history: getMonthHistory_(payload.date)
+        });
+
+      case 'saveAttendance':
+        saveAttendance_(payload.date, payload.records || [], auth.user);
+        return jsonResponse_(buildInitPayload_(payload.date, auth.user, 'Журнал сохранён'));
+
+      case 'addStudent':
+        addStudent_(String(payload.name || '').trim(), auth.user);
+        return jsonResponse_(buildInitPayload_(payload.date, auth.user, 'Ученик добавлен'));
+
+      case 'deleteStudent':
+        deleteStudent_(String(payload.studentId || '').trim(), auth.user);
+        return jsonResponse_(buildInitPayload_(payload.date, auth.user, 'Ученик удалён'));
+
+      default:
+        throw new Error('Неизвестное действие: ' + action);
+    }
+  } catch (error) {
+    return jsonResponse_({ ok: false, error: error.message, stack: error.stack });
+  }
+}
+
+function parseRequest_(e) {
+  if (!e || !e.postData || !e.postData.contents) {
+    return Object.assign({}, (e && e.parameter) || {});
+  }
+
+  const raw = e.postData.contents;
+  const type = (e.postData.type || '').toLowerCase();
+
+  if (type.indexOf('application/json') !== -1) {
+    return JSON.parse(raw);
+  }
+
+  const params = {};
+  raw.split('&').forEach(function(pair) {
+    if (!pair) return;
+    const index = pair.indexOf('=');
+    const key = decodeURIComponent(index >= 0 ? pair.slice(0, index) : pair);
+    const value = decodeURIComponent(index >= 0 ? pair.slice(index + 1) : '').replace(/\+/g, ' ');
+    params[key] = value;
+  });
+
+  if (params.payload) {
+    return JSON.parse(params.payload);
+  }
+
+  return params;
+}
+
+function validateTelegramRequest_(initDataRaw) {
+  if (!initDataRaw) {
+    throw new Error('Приложение должно быть открыто из Telegram');
+  }
+
+  const botToken = PropertiesService.getScriptProperties().getProperty('TELEGRAM_BOT_TOKEN');
+  if (!botToken) {
+    throw new Error('В Script Properties не задан TELEGRAM_BOT_TOKEN');
+  }
+
+  const parsed = parseInitData_(initDataRaw);
+  const incomingHash = parsed.hash;
+
+  if (!incomingHash) {
+    throw new Error('В initData отсутствует hash');
+  }
+
+  delete parsed.hash;
+
+  const dataCheckString = Object.keys(parsed)
+    .sort()
+    .map(function(key) {
+      return key + '=' + parsed[key];
+    })
+    .join('\n');
+
+  const secretKey = Utilities.computeHmacSha256Signature(botToken, 'WebAppData');
+  const calculatedHash = bytesToHex_(Utilities.computeHmacSha256Signature(dataCheckString, secretKey));
+
+  if (calculatedHash !== incomingHash) {
+    throw new Error('Проверка Telegram initData не пройдена');
+  }
+
+  const user = JSON.parse(parsed.user || '{}');
+  if (!user || !user.id) {
+    throw new Error('Не удалось определить пользователя Telegram');
+  }
+
+  if (APP_CONFIG.ALLOWED_TELEGRAM_IDS.indexOf(String(user.id)) === -1) {
+    throw new Error('У вас нет доступа к этому журналу');
+  }
+
+  return { ok: true, user: user };
+}
+
+function parseInitData_(initDataRaw) {
+  const result = {};
+  initDataRaw.split('&').forEach(function(chunk) {
+    if (!chunk) return;
+    const index = chunk.indexOf('=');
+    const key = decodeURIComponent(index >= 0 ? chunk.slice(0, index) : chunk);
+    const value = decodeURIComponent(index >= 0 ? chunk.slice(index + 1) : '');
+    result[key] = value;
+  });
+  return result;
+}
+
+function bytesToHex_(bytes) {
+  return bytes.map(function(b) {
+    const normalized = (b < 0 ? b + 256 : b).toString(16);
+    return normalized.length === 1 ? '0' + normalized : normalized;
+  }).join('');
+}
+
+function buildInitPayload_(date, user, toastMessage) {
+  const normalizedDate = normalizeDate_(date);
+  const students = getStudents_();
+  const records = getDayRecords_(normalizedDate);
+  const history = getMonthHistory_(normalizedDate);
+  const stats = buildStats_(students, records);
+
+  return {
+    ok: true,
+    date: normalizedDate,
+    user: {
+      id: user.id,
+      first_name: user.first_name || '',
+      last_name: user.last_name || '',
+      username: user.username || ''
+    },
+    students: students,
+    records: records,
+    history: history,
+    stats: stats,
+    toast: toastMessage || ''
+  };
+}
+
+function buildStats_(students, records) {
+  const byId = {};
+  records.forEach(function(rec) {
+    byId[rec.studentId] = rec;
+  });
+
+  let present = 0;
+  let absent = 0;
+  students.forEach(function(student) {
+    const rec = byId[student.studentId];
+    if (!rec || rec.status === 'present') {
+      present += 1;
+    } else {
+      absent += 1;
+    }
+  });
+
+  return {
+    total: students.length,
+    present: present,
+    absent: absent
+  };
+}
+
+function ensureSetup_() {
+  const ss = SpreadsheetApp.openById(APP_CONFIG.SPREADSHEET_ID);
+
+  let studentsSheet = ss.getSheetByName(APP_CONFIG.STUDENTS_SHEET);
+  if (!studentsSheet) {
+    studentsSheet = ss.insertSheet(APP_CONFIG.STUDENTS_SHEET);
+    studentsSheet.getRange(1, 1, 1, 5).setValues([['studentId', 'fullName', 'sortOrder', 'createdAt', 'createdBy']]);
+    studentsSheet.setFrozenRows(1);
+  }
+
+  if (studentsSheet.getLastRow() === 1) {
+    const now = new Date().toISOString();
+    const rows = APP_CONFIG.INITIAL_STUDENTS.map(function(name, index) {
+      return ['STU_' + Utilities.getUuid(), name, index + 1, now, 'seed'];
+    });
+    studentsSheet.getRange(2, 1, rows.length, rows[0].length).setValues(rows);
+    studentsSheet.autoResizeColumns(1, 5);
+  }
+
+  let attendanceSheet = ss.getSheetByName(APP_CONFIG.ATTENDANCE_SHEET);
+  if (!attendanceSheet) {
+    attendanceSheet = ss.insertSheet(APP_CONFIG.ATTENDANCE_SHEET);
+    attendanceSheet.getRange(1, 1, 1, 9).setValues([[
+      'date',
+      'monthKey',
+      'studentId',
+      'studentName',
+      'status',
+      'reason',
+      'comment',
+      'updatedAt',
+      'updatedByTelegramId'
+    ]]);
+    attendanceSheet.setFrozenRows(1);
+    attendanceSheet.autoResizeColumns(1, 9);
+  }
+}
+
+function getStudents_() {
+  const ss = SpreadsheetApp.openById(APP_CONFIG.SPREADSHEET_ID);
+  const sheet = ss.getSheetByName(APP_CONFIG.STUDENTS_SHEET);
+  const lastRow = sheet.getLastRow();
+  if (lastRow < 2) return [];
+
+  const values = sheet.getRange(2, 1, lastRow - 1, 5).getValues();
+  return values
+    .map(function(row) {
+      return {
+        studentId: row[0],
+        fullName: row[1],
+        sortOrder: Number(row[2]) || 0,
+        createdAt: row[3],
+        createdBy: row[4]
+      };
+    })
+    .filter(function(item) { return !!item.studentId && !!item.fullName; })
+    .sort(function(a, b) { return a.sortOrder - b.sortOrder; });
+}
+
+function getAttendanceRows_() {
+  const ss = SpreadsheetApp.openById(APP_CONFIG.SPREADSHEET_ID);
+  const sheet = ss.getSheetByName(APP_CONFIG.ATTENDANCE_SHEET);
+  const lastRow = sheet.getLastRow();
+  if (lastRow < 2) return [];
+
+  const values = sheet.getRange(2, 1, lastRow - 1, 9).getValues();
+  return values.map(function(row, index) {
+    return {
+      rowNumber: index + 2,
+      date: row[0],
+      monthKey: row[1],
+      studentId: row[2],
+      studentName: row[3],
+      status: row[4],
+      reason: row[5],
+      comment: row[6],
+      updatedAt: row[7],
+      updatedByTelegramId: row[8]
+    };
+  }).filter(function(row) {
+    return !!row.date && !!row.studentId;
+  });
+}
+
+function getDayRecords_(date) {
+  const normalizedDate = normalizeDate_(date);
+  return getAttendanceRows_()
+    .filter(function(row) { return row.date === normalizedDate; })
+    .map(function(row) {
+      return {
+        studentId: row.studentId,
+        studentName: row.studentName,
+        status: row.status || 'present',
+        reason: row.reason || '',
+        comment: row.comment || ''
+      };
+    });
+}
+
+function getMonthHistory_(date) {
+  const monthKey = getMonthKey_(date);
+  const rows = getAttendanceRows_().filter(function(row) {
+    return row.monthKey === monthKey;
+  });
+
+  const grouped = {};
+  rows.forEach(function(row) {
+    if (!grouped[row.date]) {
+      grouped[row.date] = { date: row.date, present: 0, absent: 0, total: 0 };
+    }
+    grouped[row.date].total += 1;
+    if (row.status === 'absent') {
+      grouped[row.date].absent += 1;
+    } else {
+      grouped[row.date].present += 1;
+    }
+  });
+
+  return Object.keys(grouped)
+    .sort()
+    .reverse()
+    .map(function(key) { return grouped[key]; });
+}
+
+function addStudent_(name, user) {
+  if (!name) {
+    throw new Error('Введите имя ученика');
+  }
+
+  const ss = SpreadsheetApp.openById(APP_CONFIG.SPREADSHEET_ID);
+  const sheet = ss.getSheetByName(APP_CONFIG.STUDENTS_SHEET);
+  const students = getStudents_();
+
+  const exists = students.some(function(student) {
+    return student.fullName.toLowerCase() === name.toLowerCase();
+  });
+  if (exists) {
+    throw new Error('Такой ученик уже существует');
+  }
+
+  const nextOrder = students.length ? Math.max.apply(null, students.map(function(s) { return s.sortOrder; })) + 1 : 1;
+  sheet.appendRow([
+    'STU_' + Utilities.getUuid(),
+    name,
+    nextOrder,
+    new Date().toISOString(),
+    String(user.id)
+  ]);
+
+  rebuildAllMonthSheets_();
+}
+
+function deleteStudent_(studentId) {
+  if (!studentId) {
+    throw new Error('Не передан studentId');
+  }
+
+  const ss = SpreadsheetApp.openById(APP_CONFIG.SPREADSHEET_ID);
+  const studentsSheet = ss.getSheetByName(APP_CONFIG.STUDENTS_SHEET);
+  const attendanceSheet = ss.getSheetByName(APP_CONFIG.ATTENDANCE_SHEET);
+
+  deleteRowsByPredicate_(studentsSheet, 2, function(row) {
+    return row[0] === studentId;
+  });
+
+  deleteRowsByPredicate_(attendanceSheet, 2, function(row) {
+    return row[2] === studentId;
+  });
+
+  const students = getStudents_();
+  if (students.length) {
+    const sortValues = students.map(function(student, index) {
+      return [index + 1];
+    });
+    studentsSheet.getRange(2, 3, sortValues.length, 1).setValues(sortValues);
+  }
+
+  rebuildAllMonthSheets_();
+}
+
+function deleteRowsByPredicate_(sheet, startRow, predicate) {
+  const lastRow = sheet.getLastRow();
+  if (lastRow < startRow) return;
+
+  const lastColumn = sheet.getLastColumn();
+  const values = sheet.getRange(startRow, 1, lastRow - startRow + 1, lastColumn).getValues();
+  const rowsToDelete = [];
+
+  values.forEach(function(row, index) {
+    if (predicate(row, index + startRow)) {
+      rowsToDelete.push(index + startRow);
+    }
+  });
+
+  rowsToDelete.reverse().forEach(function(rowNumber) {
+    sheet.deleteRow(rowNumber);
+  });
+}
+
+function saveAttendance_(date, records, user) {
+  const normalizedDate = normalizeDate_(date);
+  const monthKey = getMonthKey_(normalizedDate);
+  const students = getStudents_();
+  const studentsById = {};
+  students.forEach(function(student) { studentsById[student.studentId] = student; });
+
+  const sanitized = students.map(function(student) {
+    const incoming = (records || []).find(function(r) { return r.studentId === student.studentId; }) || {};
+    const status = incoming.status === 'absent' ? 'absent' : 'present';
+    return [
+      normalizedDate,
+      monthKey,
+      student.studentId,
+      student.fullName,
+      status,
+      status === 'absent' ? String(incoming.reason || '').trim() : '',
+      status === 'absent' ? String(incoming.comment || '').trim() : '',
+      new Date().toISOString(),
+      String(user.id)
+    ];
+  });
+
+  const ss = SpreadsheetApp.openById(APP_CONFIG.SPREADSHEET_ID);
+  const sheet = ss.getSheetByName(APP_CONFIG.ATTENDANCE_SHEET);
+
+  deleteRowsByPredicate_(sheet, 2, function(row) {
+    return row[0] === normalizedDate;
+  });
+
+  if (sanitized.length) {
+    sheet.getRange(sheet.getLastRow() + 1, 1, sanitized.length, sanitized[0].length).setValues(sanitized);
+  }
+
+  rebuildMonthSheet_(monthKey);
+}
+
+function rebuildAllMonthSheets_() {
+  const monthKeys = {};
+  getAttendanceRows_().forEach(function(row) {
+    if (row.monthKey) monthKeys[row.monthKey] = true;
+  });
+
+  Object.keys(monthKeys).forEach(function(monthKey) {
+    rebuildMonthSheet_(monthKey);
+  });
+}
+
+function rebuildMonthSheet_(monthKey) {
+  const students = getStudents_();
+  const rows = getAttendanceRows_().filter(function(row) {
+    return row.monthKey === monthKey;
+  });
+
+  const ss = SpreadsheetApp.openById(APP_CONFIG.SPREADSHEET_ID);
+  const sheetName = 'Журнал ' + monthKey;
+  let sheet = ss.getSheetByName(sheetName);
+  if (!sheet) {
+    sheet = ss.insertSheet(sheetName);
+  } else {
+    sheet.clear();
+    const merged = sheet.getRange(1, 1).getMergedRanges();
+    merged.forEach(function(range) { range.breakApart(); });
+  }
+
+  const year = Number(monthKey.split('-')[0]);
+  const month = Number(monthKey.split('-')[1]);
+  const daysInMonth = new Date(year, month, 0).getDate();
+  const monthLabel = Utilities.formatDate(new Date(year, month - 1, 1), Session.getScriptTimeZone(), 'MMMM yyyy');
+
+  const totalColumns = daysInMonth + 2;
+  sheet.getRange(1, 1, 1, totalColumns).merge();
+  sheet.getRange(1, 1).setValue('Журнал посещаемости — ' + capitalize_(monthLabel));
+  sheet.getRange(1, 1).setFontWeight('bold').setFontSize(14).setHorizontalAlignment('center').setVerticalAlignment('middle');
+
+  const headers = ['№', 'Список обучающихся'];
+  for (let d = 1; d <= daysInMonth; d++) {
+    headers.push(d);
+  }
+  sheet.getRange(2, 1, 1, headers.length).setValues([headers]);
+  sheet.getRange(2, 1, 1, headers.length).setFontWeight('bold').setHorizontalAlignment('center');
+
+  const map = {};
+  rows.forEach(function(row) {
+    if (!map[row.studentId]) map[row.studentId] = {};
+    const day = Number(row.date.split('-')[2]);
+    map[row.studentId][day] = row;
+  });
+
+  const values = [];
+  const notes = [];
+  students.forEach(function(student, index) {
+    const rowValues = [index + 1, student.fullName];
+    const rowNotes = ['', ''];
+    for (let day = 1; day <= daysInMonth; day++) {
+      const rec = map[student.studentId] && map[student.studentId][day];
+      if (!rec) {
+        rowValues.push('');
+        rowNotes.push('');
+      } else if (rec.status === 'absent') {
+        rowValues.push('Н');
+        const noteParts = [];
+        if (rec.reason) noteParts.push('Причина: ' + rec.reason);
+        if (rec.comment) noteParts.push('Комментарий: ' + rec.comment);
+        rowNotes.push(noteParts.join('\n'));
+      } else {
+        rowValues.push('✓');
+        rowNotes.push('');
+      }
+    }
+    values.push(rowValues);
+    notes.push(rowNotes);
+  });
+
+  if (values.length) {
+    sheet.getRange(3, 1, values.length, headers.length).setValues(values);
+    sheet.getRange(3, 1, notes.length, headers.length).setNotes(notes);
+  }
+
+  sheet.setFrozenRows(2);
+  sheet.setFrozenColumns(2);
+  sheet.setColumnWidth(1, 42);
+  sheet.setColumnWidth(2, 220);
+  for (let c = 3; c <= headers.length; c++) {
+    sheet.setColumnWidth(c, 36);
+  }
+
+  if (sheet.getMaxRows() < values.length + 3) {
+    sheet.insertRowsAfter(sheet.getMaxRows(), values.length + 3 - sheet.getMaxRows());
+  }
+
+  sheet.getRange(2, 1, Math.max(values.length + 1, 2), headers.length)
+    .setBorder(true, true, true, true, true, true)
+    .setHorizontalAlignment('center')
+    .setVerticalAlignment('middle');
+  sheet.getRange(3, 2, Math.max(values.length, 1), 1).setHorizontalAlignment('left');
+}
+
+function normalizeDate_(date) {
+  if (!date) {
+    return Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd');
+  }
+
+  if (Object.prototype.toString.call(date) === '[object Date]' && !isNaN(date)) {
+    return Utilities.formatDate(date, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+  }
+
+  const parsed = new Date(date);
+  if (!isNaN(parsed.getTime()) && String(date).indexOf('T') !== -1) {
+    return Utilities.formatDate(parsed, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+  }
+
+  const match = String(date).match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (match) {
+    return match[0];
+  }
+
+  throw new Error('Неверный формат даты. Используйте YYYY-MM-DD');
+}
+
+function getMonthKey_(date) {
+  const normalizedDate = normalizeDate_(date);
+  return normalizedDate.slice(0, 7);
+}
+
+function capitalize_(value) {
+  return value ? value.charAt(0).toUpperCase() + value.slice(1) : '';
+}
+
+function jsonResponse_(data) {
+  return ContentService
+    .createTextOutput(JSON.stringify(data))
+    .setMimeType(ContentService.MimeType.JSON);
+}
