@@ -21,7 +21,8 @@ const state = {
   filter: 'all',
   search: '',
   dirty: false,
-  editingStudentId: null
+  editingStudentId: null,
+  openedHistoryDate: null
 };
 
 const els = {
@@ -36,6 +37,7 @@ const els = {
   newStudentName: document.getElementById('newStudentName'),
   saveBtn: document.getElementById('saveBtn'),
   markAllPresentBtn: document.getElementById('markAllPresentBtn'),
+  clearHistoryBtn: document.getElementById('clearHistoryBtn'),
   userBadge: document.getElementById('userBadge'),
   loadingOverlay: document.getElementById('loadingOverlay'),
   loadingText: document.getElementById('loadingText'),
@@ -48,7 +50,11 @@ const els = {
   reasonComment: document.getElementById('reasonComment'),
   closeModalBtn: document.getElementById('closeModalBtn'),
   saveReasonBtn: document.getElementById('saveReasonBtn'),
-  markPresentFromModalBtn: document.getElementById('markPresentFromModalBtn')
+  markPresentFromModalBtn: document.getElementById('markPresentFromModalBtn'),
+  historyModal: document.getElementById('historyModal'),
+  historyModalTitle: document.getElementById('historyModalTitle'),
+  historyModalBody: document.getElementById('historyModalBody'),
+  closeHistoryModalBtn: document.getElementById('closeHistoryModalBtn')
 };
 
 function initTelegram() {
@@ -89,7 +95,7 @@ function showToast(message) {
   clearTimeout(showToast.timer);
   showToast.timer = setTimeout(() => {
     els.toast.classList.remove('show');
-  }, 2600);
+  }, 2800);
 }
 
 function todayLocalISO() {
@@ -128,7 +134,7 @@ async function api(action, extra = {}, loadingText = 'Загрузка…') {
     try {
       data = JSON.parse(text);
     } catch (error) {
-      throw new Error('Сервер вернул некорректный ответ: ' + text);
+      throw new Error('Сервер вернул некорректный ответ');
     }
 
     if (!data.ok) {
@@ -239,6 +245,7 @@ function renderAttendance() {
     const isAbsent = record.status === 'absent';
     const subtitle = isAbsent ? 'Отмечен как отсутствующий' : 'Отмечен как присутствующий';
     const initials = student.fullName.trim().charAt(0).toUpperCase();
+    const counters = `Был(а): ${student.presentCount || 0} · Не был(а): ${student.absentCount || 0}`;
 
     return `
       <article class="attendance-row ${isAbsent ? 'absent' : ''}" data-student-id="${student.studentId}">
@@ -248,6 +255,7 @@ function renderAttendance() {
             <div class="name-stack">
               <div class="student-name">${escapeHtml(student.fullName)}</div>
               <div class="student-subtitle">${escapeHtml(subtitle)}</div>
+              <div class="student-counter-line">${escapeHtml(counters)}</div>
             </div>
           </div>
           ${isAbsent ? `
@@ -279,7 +287,10 @@ function renderStudentsAdmin() {
     <div class="admin-row">
       <div>
         <strong>${index + 1}. ${escapeHtml(student.fullName)}</strong>
-        <span>Внутренний ID: ${escapeHtml(student.studentId)}</span>
+        <div class="admin-counters">
+          <span class="metric-pill">Был(а): ${student.presentCount || 0}</span>
+          <span class="metric-pill danger">Не был(а): ${student.absentCount || 0}</span>
+        </div>
       </div>
       <button class="danger-btn" data-delete-student="${student.studentId}">Удалить</button>
     </div>
@@ -288,7 +299,7 @@ function renderStudentsAdmin() {
 
 function renderHistory() {
   if (!state.history.length) {
-    els.historyList.innerHTML = '<div class="empty-state">За текущий месяц ещё нет сохранённых дат.</div>';
+    els.historyList.innerHTML = '<div class="empty-state">История пока пуста. Сохраните хотя бы одну дату.</div>';
     return;
   }
 
@@ -297,10 +308,14 @@ function renderHistory() {
       <div>
         <strong>${formatDateRu(row.date)}</strong>
         <span>Всего отмечено: ${row.total}</span>
+        <div class="history-metrics compact-left">
+          <span class="metric-pill">Были: ${row.present}</span>
+          <span class="metric-pill danger">Не были: ${row.absent}</span>
+        </div>
       </div>
-      <div class="history-metrics">
-        <span class="metric-pill">Были: ${row.present}</span>
-        <span class="metric-pill danger">Не были: ${row.absent}</span>
+      <div class="history-actions-col">
+        <button class="outline-btn" data-history-details="${row.date}">Точный список</button>
+        <button class="danger-btn" data-history-delete="${row.date}">Удалить дату</button>
       </div>
     </div>
   `).join('');
@@ -394,24 +409,51 @@ function markPresentFromModal() {
   closeReasonModal();
 }
 
-function loadDayFromServer(payload) {
-  state.date = payload.date;
-  state.records = normalizeRecords(state.students, payload.records || []);
-  state.history = payload.history || [];
-  state.dirty = false;
-  els.lessonDate.value = state.date;
-  renderAll();
+function openHistoryModal(date) {
+  const entry = state.history.find((item) => item.date === date);
+  if (!entry) return;
+
+  state.openedHistoryDate = date;
+  els.historyModalTitle.textContent = formatDateRu(entry.date);
+
+  const presentItems = (entry.presentList || []).map((item) => `<li>${escapeHtml(item.studentName)}</li>`).join('') || '<li>Никого нет</li>';
+  const absentItems = (entry.absentList || []).map((item) => `
+    <li>
+      <strong>${escapeHtml(item.studentName)}</strong>
+      ${item.reason ? `<span>Причина: ${escapeHtml(item.reason)}</span>` : ''}
+      ${item.comment ? `<span>Комментарий: ${escapeHtml(item.comment)}</span>` : ''}
+    </li>
+  `).join('') || '<li>Никого нет</li>';
+
+  els.historyModalBody.innerHTML = `
+    <div class="history-modal-summary">
+      <span class="metric-pill">Были: ${entry.present}</span>
+      <span class="metric-pill danger">Не были: ${entry.absent}</span>
+    </div>
+    <div class="history-details-grid">
+      <section class="history-details-block">
+        <h4>Были</h4>
+        <ul class="history-name-list">${presentItems}</ul>
+      </section>
+      <section class="history-details-block">
+        <h4>Не были</h4>
+        <ul class="history-name-list absent-list">${absentItems}</ul>
+      </section>
+    </div>
+  `;
+
+  els.historyModal.classList.remove('hidden');
 }
 
-async function refreshCurrentState(loadingText = 'Обновляем журнал…') {
-  const payload = await api('init', { date: state.date }, loadingText);
-  applyPayload(payload);
-  return payload;
+function closeHistoryModal() {
+  state.openedHistoryDate = null;
+  els.historyModal.classList.add('hidden');
 }
 
 async function loadInitial() {
   try {
-    await refreshCurrentState('Загружаем журнал…');
+    const payload = await api('init', { date: state.date }, 'Загружаем журнал…');
+    applyPayload(payload);
   } catch (error) {
     showToast(error.message || 'Не удалось загрузить журнал');
   }
@@ -425,7 +467,6 @@ async function saveJournal() {
       'Сохраняем журнал…'
     );
     applyPayload(payload);
-    await refreshCurrentState('Обновляем историю…');
     if (tg?.HapticFeedback) tg.HapticFeedback.notificationOccurred('success');
   } catch (error) {
     if (tg?.HapticFeedback) tg.HapticFeedback.notificationOccurred('error');
@@ -444,7 +485,6 @@ async function addStudent() {
     const payload = await api('addStudent', { name, date: state.date }, 'Добавляем ученика…');
     els.newStudentName.value = '';
     applyPayload(payload);
-    await refreshCurrentState('Обновляем список учеников…');
     state.activeTab = 'students';
     renderTabs();
   } catch (error) {
@@ -461,9 +501,41 @@ async function deleteStudent(studentId) {
   try {
     const payload = await api('deleteStudent', { studentId, date: state.date }, 'Удаляем ученика…');
     applyPayload(payload);
-    await refreshCurrentState('Обновляем список учеников…');
   } catch (error) {
     showToast(error.message || 'Не удалось удалить ученика');
+  }
+}
+
+async function deleteHistoryDate(date) {
+  const ok = window.confirm(`Удалить сохранение за ${formatDateRu(date)}?`);
+  if (!ok) return;
+
+  try {
+    const payload = await api('deleteHistoryDate', { date: state.date, dateToDelete: date }, 'Удаляем дату…');
+    closeHistoryModal();
+    applyPayload(payload);
+  } catch (error) {
+    showToast(error.message || 'Не удалось удалить дату');
+  }
+}
+
+async function clearHistory() {
+  if (!state.history.length) {
+    showToast('История уже пустая');
+    return;
+  }
+
+  const first = window.confirm('Удалить всю историю журналов за все даты?');
+  if (!first) return;
+  const second = window.confirm('Подтвердите ещё раз: история будет удалена без возможности восстановления.');
+  if (!second) return;
+
+  try {
+    const payload = await api('clearHistory', { date: state.date }, 'Очищаем историю…');
+    closeHistoryModal();
+    applyPayload(payload);
+  } catch (error) {
+    showToast(error.message || 'Не удалось очистить историю');
   }
 }
 
@@ -506,7 +578,7 @@ function bindUI() {
     state.date = els.lessonDate.value;
     try {
       const payload = await api('getDay', { date: state.date }, 'Загружаем выбранную дату…');
-      loadDayFromServer(payload);
+      applyPayload(payload);
     } catch (error) {
       showToast(error.message || 'Не удалось загрузить дату');
     }
@@ -551,9 +623,23 @@ function bindUI() {
     deleteStudent(deleteButton.dataset.deleteStudent);
   });
 
+  els.historyList.addEventListener('click', (event) => {
+    const detailsButton = event.target.closest('[data-history-details]');
+    if (detailsButton) {
+      openHistoryModal(detailsButton.dataset.historyDetails);
+      return;
+    }
+    const deleteButton = event.target.closest('[data-history-delete]');
+    if (deleteButton) {
+      deleteHistoryDate(deleteButton.dataset.historyDelete);
+    }
+  });
+
   els.markAllPresentBtn.addEventListener('click', markAllPresent);
   els.saveBtn.addEventListener('click', saveJournal);
   els.addStudentBtn.addEventListener('click', addStudent);
+  els.clearHistoryBtn.addEventListener('click', clearHistory);
+
   els.newStudentName.addEventListener('keydown', (event) => {
     if (event.key === 'Enter') {
       event.preventDefault();
@@ -565,9 +651,12 @@ function bindUI() {
   els.saveReasonBtn.addEventListener('click', saveReasonFromModal);
   els.markPresentFromModalBtn.addEventListener('click', markPresentFromModal);
   els.reasonModal.addEventListener('click', (event) => {
-    if (event.target === els.reasonModal) {
-      closeReasonModal();
-    }
+    if (event.target === els.reasonModal) closeReasonModal();
+  });
+
+  els.closeHistoryModalBtn.addEventListener('click', closeHistoryModal);
+  els.historyModal.addEventListener('click', (event) => {
+    if (event.target === els.historyModal) closeHistoryModal();
   });
 }
 

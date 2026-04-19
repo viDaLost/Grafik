@@ -566,3 +566,79 @@ textarea { min-height: 110px; resize: vertical; }
   .segmented { grid-template-columns: 1fr; }
   .student-name { font-size: 16px; }
 }
+
+.history-head-actions {
+  margin-top: 12px;
+}
+.student-counter-line {
+  margin-top: 4px;
+  color: #40516f;
+  font-size: 12px;
+  font-weight: 700;
+}
+.admin-counters {
+  margin-top: 10px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.history-actions-col {
+  display: grid;
+  gap: 8px;
+  min-width: 180px;
+}
+.compact-left {
+  justify-content: flex-start;
+  margin-top: 10px;
+}
+.history-modal-card {
+  max-height: min(82vh, 780px);
+  display: flex;
+  flex-direction: column;
+}
+.history-modal-body {
+  overflow: auto;
+}
+.history-modal-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.history-details-grid {
+  display: grid;
+  gap: 12px;
+}
+.history-details-block {
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  padding: 14px;
+  background: #f9fbff;
+}
+.history-details-block h4 {
+  margin: 0 0 10px;
+  font-size: 16px;
+}
+.history-name-list {
+  margin: 0;
+  padding-left: 18px;
+  display: grid;
+  gap: 8px;
+}
+.history-name-list li {
+  color: var(--text);
+}
+.history-name-list li span {
+  display: block;
+  margin-top: 2px;
+  color: var(--hint);
+  font-size: 13px;
+}
+.absent-list strong {
+  display: block;
+}
+@media (max-width: 760px) {
+  .history-actions-col {
+    min-width: 0;
+  }
+}

@@ -3,6 +3,7 @@ const APP_CONFIG = {
   ALLOWED_TELEGRAM_IDS: ['26156823', '1288379477'],
   STUDENTS_SHEET: 'Ученики',
   ATTENDANCE_SHEET: 'Посещения',
+  JOURNAL_PREFIX: 'Журнал ',
   INITIAL_STUDENTS: [
     'Агния',
     'Алиса',
@@ -63,15 +64,8 @@ function doPost(e) {
 
     switch (action) {
       case 'init':
-        return jsonResponse_(buildInitPayload_(payload.date, auth.user));
-
       case 'getDay':
-        return jsonResponse_({
-          ok: true,
-          date: normalizeDate_(payload.date),
-          records: getDayRecords_(payload.date),
-          history: getMonthHistory_(payload.date)
-        });
+        return jsonResponse_(buildInitPayload_(payload.date, auth.user));
 
       case 'saveAttendance':
         saveAttendance_(payload.date, payload.records || [], auth.user);
@@ -84,6 +78,14 @@ function doPost(e) {
       case 'deleteStudent':
         deleteStudent_(String(payload.studentId || '').trim());
         return jsonResponse_(buildInitPayload_(payload.date, auth.user, 'Ученик удалён'));
+
+      case 'deleteHistoryDate':
+        deleteHistoryDate_(payload.dateToDelete || payload.targetDate || payload.historyDate || '');
+        return jsonResponse_(buildInitPayload_(payload.date, auth.user, 'Сохранение за дату удалено'));
+
+      case 'clearHistory':
+        clearHistory_();
+        return jsonResponse_(buildInitPayload_(payload.date, auth.user, 'История очищена'));
 
       default:
         throw new Error('Неизвестное действие: ' + action);
@@ -149,9 +151,7 @@ function validateTelegramRequest_(initDataRaw) {
 
   const secretKey = Utilities.computeHmacSha256Signature(botToken, 'WebAppData');
   const dataCheckBytes = Utilities.newBlob(dataCheckString).getBytes();
-  const calculatedHash = bytesToHex_(
-    Utilities.computeHmacSha256Signature(dataCheckBytes, secretKey)
-  ).toLowerCase();
+  const calculatedHash = bytesToHex_(Utilities.computeHmacSha256Signature(dataCheckBytes, secretKey)).toLowerCase();
 
   if (calculatedHash !== incomingHash) {
     throw new Error('Проверка Telegram initData не пройдена');
@@ -188,54 +188,6 @@ function bytesToHex_(bytes) {
   }).join('');
 }
 
-function buildInitPayload_(date, user, toastMessage) {
-  const normalizedDate = normalizeDate_(date);
-  const students = getStudents_();
-  const records = getDayRecords_(normalizedDate);
-  const history = getMonthHistory_(normalizedDate);
-  const stats = buildStats_(students, records);
-
-  return {
-    ok: true,
-    date: normalizedDate,
-    user: {
-      id: user.id,
-      first_name: user.first_name || '',
-      last_name: user.last_name || '',
-      username: user.username || ''
-    },
-    students: students,
-    records: records,
-    history: history,
-    stats: stats,
-    toast: toastMessage || ''
-  };
-}
-
-function buildStats_(students, records) {
-  const byId = {};
-  records.forEach(function(rec) {
-    byId[rec.studentId] = rec;
-  });
-
-  let present = 0;
-  let absent = 0;
-  students.forEach(function(student) {
-    const rec = byId[student.studentId];
-    if (!rec || rec.status === 'present') {
-      present += 1;
-    } else {
-      absent += 1;
-    }
-  });
-
-  return {
-    total: students.length,
-    present: present,
-    absent: absent
-  };
-}
-
 function ensureSetup_() {
   const ss = SpreadsheetApp.openById(APP_CONFIG.SPREADSHEET_ID);
 
@@ -252,8 +204,10 @@ function ensureSetup_() {
     const rows = APP_CONFIG.INITIAL_STUDENTS.map(function(name, index) {
       return ['STU_' + Utilities.getUuid(), name, index + 1, now, 'seed'];
     });
-    studentsSheet.getRange(2, 1, rows.length, rows[0].length).setValues(rows);
-    studentsSheet.getRange(2, 1, rows.length, 5).setNumberFormat('@');
+    if (rows.length) {
+      studentsSheet.getRange(2, 1, rows.length, rows[0].length).setValues(rows);
+      studentsSheet.getRange(2, 1, rows.length, rows[0].length).setNumberFormat('@');
+    }
     studentsSheet.autoResizeColumns(1, 5);
   }
 
@@ -275,6 +229,36 @@ function ensureSetup_() {
     attendanceSheet.getRange('A:I').setNumberFormat('@');
     attendanceSheet.autoResizeColumns(1, 9);
   }
+}
+
+function buildInitPayload_(date, user, toastMessage) {
+  const normalizedDate = normalizeDate_(date);
+  const students = getStudents_();
+  const attendanceRows = getAttendanceRows_();
+  const studentCountersById = buildStudentCountersById_(students, attendanceRows);
+  const studentsWithStats = students.map(function(student) {
+    const counters = studentCountersById[student.studentId] || { presentCount: 0, absentCount: 0, savedCount: 0 };
+    return Object.assign({}, student, counters);
+  });
+  const records = getDayRecordsFromRows_(attendanceRows, normalizedDate);
+  const history = buildAllHistory_(attendanceRows, studentsWithStats);
+  const stats = buildStats_(studentsWithStats, records);
+
+  return {
+    ok: true,
+    date: normalizedDate,
+    user: {
+      id: user.id,
+      first_name: user.first_name || '',
+      last_name: user.last_name || '',
+      username: user.username || ''
+    },
+    students: studentsWithStats,
+    records: records,
+    history: history,
+    stats: stats,
+    toast: toastMessage || ''
+  };
 }
 
 function getStudents_() {
@@ -314,7 +298,7 @@ function getAttendanceRows_() {
       monthKey: monthKey,
       studentId: String(row[2] || '').trim(),
       studentName: String(row[3] || '').trim(),
-      status: String(row[4] || '').trim(),
+      status: String(row[4] || '').trim() === 'absent' ? 'absent' : 'present',
       reason: String(row[5] || '').trim(),
       comment: String(row[6] || '').trim(),
       updatedAt: row[7],
@@ -335,14 +319,13 @@ function normalizeSheetDateValue_(value) {
   const text = String(value).trim();
   if (!text) return '';
 
-  const directMatch = text.match(/^(\d{4})-(\d{2})-(\d{2})$/);
-  if (directMatch) {
-    return directMatch[0];
+  if (/^\d{4}-\d{2}-\d{2}$/.test(text)) {
+    return text;
   }
 
-  const slashMatch = text.match(/^(\d{1,2})\.(\d{1,2})\.(\d{4})$/);
-  if (slashMatch) {
-    return [slashMatch[3], pad2_(slashMatch[2]), pad2_(slashMatch[1])].join('-');
+  const dotMatch = text.match(/^(\d{1,2})\.(\d{1,2})\.(\d{4})$/);
+  if (dotMatch) {
+    return [dotMatch[3], pad2_(dotMatch[2]), pad2_(dotMatch[1])].join('-');
   }
 
   const parsed = new Date(text);
@@ -362,21 +345,18 @@ function normalizeSheetMonthKeyValue_(value, fallbackDate) {
   if (/^\d{4}-\d{2}$/.test(text)) {
     return text;
   }
-
   if (/^\d{4}-\d{2}-\d{2}$/.test(text)) {
     return text.slice(0, 7);
   }
-
   if (fallbackDate) {
     return fallbackDate.slice(0, 7);
   }
-
   return '';
 }
 
-function getDayRecords_(date) {
+function getDayRecordsFromRows_(attendanceRows, date) {
   const normalizedDate = normalizeDate_(date);
-  return getAttendanceRows_()
+  return attendanceRows
     .filter(function(row) { return row.date === normalizedDate; })
     .map(function(row) {
       return {
@@ -389,29 +369,110 @@ function getDayRecords_(date) {
     });
 }
 
-function getMonthHistory_(date) {
-  const monthKey = getMonthKey_(date);
-  const rows = getAttendanceRows_().filter(function(row) {
-    return row.monthKey === monthKey;
+function buildStudentCountersById_(students, attendanceRows) {
+  const countersById = {};
+  students.forEach(function(student) {
+    countersById[student.studentId] = {
+      presentCount: 0,
+      absentCount: 0,
+      savedCount: 0
+    };
+  });
+
+  attendanceRows.forEach(function(row) {
+    if (!countersById[row.studentId]) {
+      countersById[row.studentId] = { presentCount: 0, absentCount: 0, savedCount: 0 };
+    }
+    countersById[row.studentId].savedCount += 1;
+    if (row.status === 'absent') {
+      countersById[row.studentId].absentCount += 1;
+    } else {
+      countersById[row.studentId].presentCount += 1;
+    }
+  });
+
+  return countersById;
+}
+
+function buildAllHistory_(attendanceRows, students) {
+  const orderById = {};
+  students.forEach(function(student, index) {
+    orderById[student.studentId] = student.sortOrder || (index + 1);
   });
 
   const grouped = {};
-  rows.forEach(function(row) {
+  attendanceRows.forEach(function(row) {
     if (!grouped[row.date]) {
-      grouped[row.date] = { date: row.date, present: 0, absent: 0, total: 0 };
+      grouped[row.date] = {
+        date: row.date,
+        total: 0,
+        present: 0,
+        absent: 0,
+        presentList: [],
+        absentList: []
+      };
     }
-    grouped[row.date].total += 1;
+
+    const group = grouped[row.date];
+    group.total += 1;
+
     if (row.status === 'absent') {
-      grouped[row.date].absent += 1;
+      group.absent += 1;
+      group.absentList.push({
+        studentId: row.studentId,
+        studentName: row.studentName,
+        reason: row.reason || '',
+        comment: row.comment || ''
+      });
     } else {
-      grouped[row.date].present += 1;
+      group.present += 1;
+      group.presentList.push({
+        studentId: row.studentId,
+        studentName: row.studentName
+      });
     }
   });
+
+  const sorter = function(a, b) {
+    const aOrder = orderById[a.studentId] || 99999;
+    const bOrder = orderById[b.studentId] || 99999;
+    if (aOrder !== bOrder) return aOrder - bOrder;
+    return String(a.studentName || '').localeCompare(String(b.studentName || ''), 'ru');
+  };
 
   return Object.keys(grouped)
     .sort()
     .reverse()
-    .map(function(key) { return grouped[key]; });
+    .map(function(dateKey) {
+      const entry = grouped[dateKey];
+      entry.presentList.sort(sorter);
+      entry.absentList.sort(sorter);
+      return entry;
+    });
+}
+
+function buildStats_(students, records) {
+  const byId = {};
+  records.forEach(function(rec) {
+    byId[rec.studentId] = rec;
+  });
+
+  let present = 0;
+  let absent = 0;
+  students.forEach(function(student) {
+    const rec = byId[student.studentId];
+    if (!rec || rec.status === 'present') {
+      present += 1;
+    } else {
+      absent += 1;
+    }
+  });
+
+  return {
+    total: students.length,
+    present: present,
+    absent: absent
+  };
 }
 
 function addStudent_(name, user) {
@@ -439,9 +500,7 @@ function addStudent_(name, user) {
     String(user.id)
   ]);
   SpreadsheetApp.flush();
-
-  rebuildAllMonthSheets_();
-  SpreadsheetApp.flush();
+  syncAllJournalSheets_();
 }
 
 function deleteStudent_(studentId) {
@@ -470,27 +529,31 @@ function deleteStudent_(studentId) {
   }
 
   SpreadsheetApp.flush();
-  rebuildAllMonthSheets_();
-  SpreadsheetApp.flush();
+  syncAllJournalSheets_();
 }
 
-function deleteRowsByPredicate_(sheet, startRow, predicate) {
-  const lastRow = sheet.getLastRow();
-  if (lastRow < startRow) return;
+function deleteHistoryDate_(date) {
+  const normalizedDate = normalizeDate_(date);
+  const ss = SpreadsheetApp.openById(APP_CONFIG.SPREADSHEET_ID);
+  const attendanceSheet = ss.getSheetByName(APP_CONFIG.ATTENDANCE_SHEET);
+  const monthKey = getMonthKey_(normalizedDate);
 
-  const lastColumn = Math.max(sheet.getLastColumn(), 1);
-  const values = sheet.getRange(startRow, 1, lastRow - startRow + 1, lastColumn).getValues();
-  const rowsToDelete = [];
-
-  values.forEach(function(row, index) {
-    if (predicate(row, index + startRow)) {
-      rowsToDelete.push(index + startRow);
-    }
+  deleteRowsByPredicate_(attendanceSheet, 2, function(row) {
+    return normalizeSheetDateValue_(row[0]) === normalizedDate;
   });
 
-  rowsToDelete.reverse().forEach(function(rowNumber) {
-    sheet.deleteRow(rowNumber);
-  });
+  SpreadsheetApp.flush();
+  syncJournalSheet_(monthKey);
+}
+
+function clearHistory_() {
+  const ss = SpreadsheetApp.openById(APP_CONFIG.SPREADSHEET_ID);
+  const attendanceSheet = ss.getSheetByName(APP_CONFIG.ATTENDANCE_SHEET);
+  const lastRow = attendanceSheet.getLastRow();
+  if (lastRow >= 2) {
+    attendanceSheet.deleteRows(2, lastRow - 1);
+  }
+  deleteAllJournalSheets_();
 }
 
 function saveAttendance_(date, records, user) {
@@ -535,37 +598,99 @@ function saveAttendance_(date, records, user) {
   }
 
   SpreadsheetApp.flush();
-  rebuildMonthSheet_(monthKey);
-  SpreadsheetApp.flush();
+  syncJournalSheet_(monthKey);
 }
 
-function rebuildAllMonthSheets_() {
-  const monthKeys = {};
-  getAttendanceRows_().forEach(function(row) {
-    if (row.monthKey && /^\d{4}-\d{2}$/.test(row.monthKey)) {
-      monthKeys[row.monthKey] = true;
+function deleteRowsByPredicate_(sheet, startRow, predicate) {
+  const lastRow = sheet.getLastRow();
+  if (lastRow < startRow) return 0;
+
+  const lastColumn = Math.max(sheet.getLastColumn(), 1);
+  const values = sheet.getRange(startRow, 1, lastRow - startRow + 1, lastColumn).getValues();
+  const rowsToDelete = [];
+
+  values.forEach(function(row, index) {
+    if (predicate(row, index + startRow)) {
+      rowsToDelete.push(index + startRow);
     }
   });
 
-  Object.keys(monthKeys)
-    .sort()
-    .forEach(function(monthKey) {
-      rebuildMonthSheet_(monthKey);
-    });
+  rowsToDelete.reverse().forEach(function(rowNumber) {
+    sheet.deleteRow(rowNumber);
+  });
+
+  return rowsToDelete.length;
 }
 
-function rebuildMonthSheet_(monthKey) {
+function syncAllJournalSheets_() {
+  const attendanceRows = getAttendanceRows_();
+  const monthKeysMap = {};
+  attendanceRows.forEach(function(row) {
+    if (row.monthKey && /^\d{4}-\d{2}$/.test(row.monthKey)) {
+      monthKeysMap[row.monthKey] = true;
+    }
+  });
+
+  const ss = SpreadsheetApp.openById(APP_CONFIG.SPREADSHEET_ID);
+  ss.getSheets().forEach(function(sheet) {
+    const name = sheet.getName();
+    if (name.indexOf(APP_CONFIG.JOURNAL_PREFIX) === 0) {
+      const monthKey = name.replace(APP_CONFIG.JOURNAL_PREFIX, '');
+      if (!monthKeysMap[monthKey]) {
+        ss.deleteSheet(sheet);
+      }
+    }
+  });
+
+  Object.keys(monthKeysMap).sort().forEach(function(monthKey) {
+    rebuildMonthSheet_(monthKey, attendanceRows);
+  });
+}
+
+function syncJournalSheet_(monthKey) {
+  if (!/^\d{4}-\d{2}$/.test(String(monthKey || ''))) {
+    return;
+  }
+
+  const attendanceRows = getAttendanceRows_();
+  const hasRows = attendanceRows.some(function(row) {
+    return row.monthKey === monthKey;
+  });
+
+  const ss = SpreadsheetApp.openById(APP_CONFIG.SPREADSHEET_ID);
+  const existing = ss.getSheetByName(getJournalSheetName_(monthKey));
+
+  if (!hasRows) {
+    if (existing) {
+      ss.deleteSheet(existing);
+    }
+    return;
+  }
+
+  rebuildMonthSheet_(monthKey, attendanceRows);
+}
+
+function deleteAllJournalSheets_() {
+  const ss = SpreadsheetApp.openById(APP_CONFIG.SPREADSHEET_ID);
+  ss.getSheets().forEach(function(sheet) {
+    if (sheet.getName().indexOf(APP_CONFIG.JOURNAL_PREFIX) === 0) {
+      ss.deleteSheet(sheet);
+    }
+  });
+}
+
+function rebuildMonthSheet_(monthKey, allAttendanceRows) {
   if (!/^\d{4}-\d{2}$/.test(String(monthKey || ''))) {
     return;
   }
 
   const students = getStudents_();
-  const rows = getAttendanceRows_().filter(function(row) {
+  const rows = (allAttendanceRows || getAttendanceRows_()).filter(function(row) {
     return row.monthKey === monthKey;
   });
 
   const ss = SpreadsheetApp.openById(APP_CONFIG.SPREADSHEET_ID);
-  const sheetName = 'Журнал ' + monthKey;
+  const sheetName = getJournalSheetName_(monthKey);
   let sheet = ss.getSheetByName(sheetName);
   if (!sheet) {
     sheet = ss.insertSheet(sheetName);
@@ -579,7 +704,6 @@ function rebuildMonthSheet_(monthKey) {
   const daysInMonth = new Date(year, month, 0).getDate();
   const monthLabel = Utilities.formatDate(new Date(year, month - 1, 1), Session.getScriptTimeZone(), 'MMMM yyyy');
   const headers = ['№', 'Список обучающихся'];
-
   for (let day = 1; day <= daysInMonth; day++) {
     headers.push(day);
   }
@@ -644,18 +768,16 @@ function rebuildMonthSheet_(monthKey) {
     backgrounds.push(rowBackgrounds);
   });
 
-  if (values.length) {
+  if (values.length && headers.length) {
     sheet.getRange(3, 1, values.length, headers.length).setValues(values);
-    sheet.getRange(3, 1, notes.length, headers.length).setNotes(notes);
-    sheet.getRange(3, 1, backgrounds.length, headers.length).setBackgrounds(backgrounds);
+    sheet.getRange(3, 1, values.length, headers.length).setNotes(notes);
+    sheet.getRange(3, 1, values.length, headers.length).setBackgrounds(backgrounds);
   }
 
   sheet.setFrozenRows(2);
-  sheet.setFrozenColumns(Math.min(2, headers.length));
+  sheet.setFrozenColumns(2);
   sheet.setColumnWidth(1, 44);
-  if (headers.length >= 2) {
-    sheet.setColumnWidth(2, 230);
-  }
+  sheet.setColumnWidth(2, 230);
   for (let c = 3; c <= headers.length; c++) {
     sheet.setColumnWidth(c, 38);
   }
@@ -663,8 +785,9 @@ function rebuildMonthSheet_(monthKey) {
   sheet.setRowHeights(1, 1, 30);
   sheet.setRowHeights(2, 1, 30);
 
-  if (sheet.getMaxRows() < values.length + 4) {
-    sheet.insertRowsAfter(sheet.getMaxRows(), values.length + 4 - sheet.getMaxRows());
+  const neededRows = Math.max(values.length + 4, 4);
+  if (sheet.getMaxRows() < neededRows) {
+    sheet.insertRowsAfter(sheet.getMaxRows(), neededRows - sheet.getMaxRows());
   }
 
   sheet.getRange(1, 1, Math.max(values.length + 2, 2), headers.length)
@@ -688,6 +811,10 @@ function unmergeWholeSheet_(sheet) {
   });
 }
 
+function getJournalSheetName_(monthKey) {
+  return APP_CONFIG.JOURNAL_PREFIX + monthKey;
+}
+
 function pad2_(value) {
   const text = String(value || '').trim();
   return text.length === 1 ? '0' + text : text;
@@ -698,14 +825,13 @@ function normalizeDate_(date) {
     return Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd');
   }
 
-  if (Object.prototype.toString.call(date) === '[object Date]' && !isNaN(date)) {
+  if (Object.prototype.toString.call(date) === '[object Date]' && !isNaN(date.getTime ? date.getTime() : date)) {
     return Utilities.formatDate(date, Session.getScriptTimeZone(), 'yyyy-MM-dd');
   }
 
   const text = String(date).trim();
-  const directMatch = text.match(/^(\d{4})-(\d{2})-(\d{2})$/);
-  if (directMatch) {
-    return directMatch[0];
+  if (/^\d{4}-\d{2}-\d{2}$/.test(text)) {
+    return text;
   }
 
   const parsed = new Date(text);
@@ -717,8 +843,7 @@ function normalizeDate_(date) {
 }
 
 function getMonthKey_(date) {
-  const normalizedDate = normalizeDate_(date);
-  return normalizedDate.slice(0, 7);
+  return normalizeDate_(date).slice(0, 7);
 }
 
 function capitalize_(value) {
@@ -726,7 +851,5 @@ function capitalize_(value) {
 }
 
 function jsonResponse_(data) {
-  return ContentService
-    .createTextOutput(JSON.stringify(data))
-    .setMimeType(ContentService.MimeType.JSON);
+  return ContentService.createTextOutput(JSON.stringify(data)).setMimeType(ContentService.MimeType.JSON);
 }

@@ -15,7 +15,7 @@
         <div>
           <div class="eyebrow">Telegram Mini App</div>
           <h1>Журнал посещения</h1>
-          <p class="top-subtitle">Быстрая отметка присутствия, причин отсутствия и история занятий в Google Таблице.</p>
+          <p class="top-subtitle">Быстрая отметка присутствия, причины отсутствия, полная история сохранений и удобный учёт в Google Таблице.</p>
         </div>
         <div class="user-chip" id="userBadge">Вход…</div>
       </div>
@@ -52,7 +52,7 @@
           <div class="section-heading">
             <div>
               <h2>Отметки за день</h2>
-              <p>Компактный режим для телефона: быстро переключайте статус, а причину отсутствия редактируйте отдельно.</p>
+              <p>Поиск и фильтр ускоряют работу, а напротив каждого имени показывается накопительный счётчик посещений и пропусков.</p>
             </div>
             <div class="actions-grid">
               <button class="secondary-btn" id="markAllPresentBtn">Отметить всех как присутствующих</button>
@@ -78,7 +78,7 @@
           <div class="section-heading compact-gap">
             <div>
               <h2>Ученики</h2>
-              <p>Здесь можно быстро добавить нового ученика или удалить лишнего. Из таблицы запись тоже удаляется.</p>
+              <p>Добавляйте новых участников и удаляйте лишних. Счётчики справа показывают, сколько раз каждый ученик был и не был на занятиях.</p>
             </div>
           </div>
 
@@ -95,8 +95,11 @@
         <section class="card section-card">
           <div class="section-heading compact-gap">
             <div>
-              <h2>История месяца</h2>
-              <p>Краткая сводка по сохранённым датам текущего месяца.</p>
+              <h2>История всех сохранений</h2>
+              <p>Здесь показываются все сохранённые даты. Можно посмотреть точный список поимённо, удалить одну дату или полностью очистить историю.</p>
+            </div>
+            <div class="history-head-actions">
+              <button class="danger-btn" id="clearHistoryBtn">Очистить всю историю</button>
             </div>
           </div>
 
@@ -128,6 +131,20 @@
         <button class="secondary-btn" id="markPresentFromModalBtn">Вернуть в присутствующие</button>
         <button class="primary-btn" id="saveReasonBtn">Сохранить причину</button>
       </div>
+    </div>
+  </div>
+
+  <div class="modal-overlay hidden" id="historyModal">
+    <div class="modal-card history-modal-card">
+      <div class="modal-header">
+        <div>
+          <div class="eyebrow">Точный список</div>
+          <h3 id="historyModalTitle">Сохранение</h3>
+        </div>
+        <button class="icon-btn" id="closeHistoryModalBtn" aria-label="Закрыть">✕</button>
+      </div>
+
+      <div class="modal-body history-modal-body" id="historyModalBody"></div>
     </div>
   </div>
 
