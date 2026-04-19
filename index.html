@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Журнал посещаемости</title>
+  <meta name="theme-color" content="#10131c">
+  <link rel="stylesheet" href="./styles.css">
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <script src="./config.js"></script>
+</head>
+<body>
+  <div class="app-shell">
+    <header class="hero-card">
+      <div>
+        <p class="eyebrow">Telegram Mini App</p>
+        <h1>Журнал посещаемости</h1>
+        <p class="hero-subtitle">Отмечайте присутствие, фиксируйте причины отсутствия и храните всё в Google Таблице.</p>
+      </div>
+      <div class="hero-badge" id="userBadge">Загрузка…</div>
+    </header>
+
+    <section class="controls-grid">
+      <div class="glass-card control-card">
+        <label for="lessonDate">Дата занятия</label>
+        <input id="lessonDate" type="date">
+      </div>
+
+      <div class="glass-card stats-card-row">
+        <div class="stat-box">
+          <span>Всего</span>
+          <strong id="statTotal">0</strong>
+        </div>
+        <div class="stat-box success">
+          <span>Были</span>
+          <strong id="statPresent">0</strong>
+        </div>
+        <div class="stat-box danger">
+          <span>Не были</span>
+          <strong id="statAbsent">0</strong>
+        </div>
+      </div>
+    </section>
+
+    <nav class="tabs">
+      <button class="tab active" data-tab="attendance">Посещение</button>
+      <button class="tab" data-tab="students">Ученики</button>
+      <button class="tab" data-tab="history">История</button>
+    </nav>
+
+    <main>
+      <section class="tab-panel active" id="panel-attendance">
+        <div class="panel-toolbar">
+          <div>
+            <h2>Отметки за день</h2>
+            <p>По умолчанию все отмечены как присутствующие. Для отсутствующих укажите причину.</p>
+          </div>
+          <div class="toolbar-actions">
+            <button class="secondary-btn" id="markAllPresentBtn">Все были</button>
+            <button class="primary-btn" id="saveBtn">Сохранить журнал</button>
+          </div>
+        </div>
+        <div id="studentsList" class="student-list"></div>
+      </section>
+
+      <section class="tab-panel" id="panel-students">
+        <div class="panel-toolbar">
+          <div>
+            <h2>Список учеников</h2>
+            <p>Можно добавлять новых учеников и удалять лишних. Из таблицы они тоже удаляются.</p>
+          </div>
+        </div>
+
+        <div class="glass-card add-student-card">
+          <input type="text" id="newStudentName" placeholder="Имя нового ученика">
+          <button class="primary-btn" id="addStudentBtn">Добавить</button>
+        </div>
+
+        <div id="studentsAdminList" class="admin-list"></div>
+      </section>
+
+      <section class="tab-panel" id="panel-history">
+        <div class="panel-toolbar">
+          <div>
+            <h2>История месяца</h2>
+            <p>Краткая сводка по сохранённым датам текущего месяца.</p>
+          </div>
+        </div>
+
+        <div class="glass-card">
+          <div id="historyList" class="history-list"></div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <div class="loading-overlay" id="loadingOverlay">
+    <div class="loader-card">
+      <div class="spinner"></div>
+      <p id="loadingText">Загрузка…</p>
+    </div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+  <script src="./app.js"></script>
+</body>
+</html>
