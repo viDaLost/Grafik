@@ -1,3 +1,3 @@
 window.APP_CONFIG = {
-  API_URL: 'PASTE_YOUR_GOOGLE_APPS_SCRIPT_WEB_APP_URL_HERE'
+  API_URL: 'https://script.google.com/macros/s/AKfycbxzxRBP9xdW7G6pEEhyUL3NcatJccdXpMS4nV8sqMFXIzXirxa6tSC7PKY-yKWxluBj/exec'
 };
