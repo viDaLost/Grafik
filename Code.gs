@@ -82,7 +82,7 @@ function doPost(e) {
         return jsonResponse_(buildInitPayload_(payload.date, auth.user, 'Ученик добавлен'));
 
       case 'deleteStudent':
-        deleteStudent_(String(payload.studentId || '').trim(), auth.user);
+        deleteStudent_(String(payload.studentId || '').trim());
         return jsonResponse_(buildInitPayload_(payload.date, auth.user, 'Ученик удалён'));
 
       default:
@@ -132,7 +132,7 @@ function validateTelegramRequest_(initDataRaw) {
   }
 
   const parsed = parseInitData_(initDataRaw);
-  const incomingHash = parsed.hash;
+  const incomingHash = String(parsed.hash || '').toLowerCase();
 
   if (!incomingHash) {
     throw new Error('В initData отсутствует hash');
@@ -148,7 +148,10 @@ function validateTelegramRequest_(initDataRaw) {
     .join('\n');
 
   const secretKey = Utilities.computeHmacSha256Signature(botToken, 'WebAppData');
-  const calculatedHash = bytesToHex_(Utilities.computeHmacSha256Signature(dataCheckString, secretKey));
+  const dataCheckBytes = Utilities.newBlob(dataCheckString).getBytes();
+  const calculatedHash = bytesToHex_(
+    Utilities.computeHmacSha256Signature(dataCheckBytes, secretKey)
+  ).toLowerCase();
 
   if (calculatedHash !== incomingHash) {
     throw new Error('Проверка Telegram initData не пройдена');
@@ -255,7 +258,7 @@ function ensureSetup_() {
   let attendanceSheet = ss.getSheetByName(APP_CONFIG.ATTENDANCE_SHEET);
   if (!attendanceSheet) {
     attendanceSheet = ss.insertSheet(APP_CONFIG.ATTENDANCE_SHEET);
-    attendanceSheet.getRange(1, 1, 1, 9).setValues([[
+    attendanceSheet.getRange(1, 1, 1, 9).setValues([[ 
       'date',
       'monthKey',
       'studentId',
@@ -436,11 +439,16 @@ function saveAttendance_(date, records, user) {
   const normalizedDate = normalizeDate_(date);
   const monthKey = getMonthKey_(normalizedDate);
   const students = getStudents_();
-  const studentsById = {};
-  students.forEach(function(student) { studentsById[student.studentId] = student; });
+
+  const recordsById = {};
+  (records || []).forEach(function(item) {
+    if (item && item.studentId) {
+      recordsById[item.studentId] = item;
+    }
+  });
 
   const sanitized = students.map(function(student) {
-    const incoming = (records || []).find(function(r) { return r.studentId === student.studentId; }) || {};
+    const incoming = recordsById[student.studentId] || {};
     const status = incoming.status === 'absent' ? 'absent' : 'present';
     return [
       normalizedDate,
@@ -491,28 +499,35 @@ function rebuildMonthSheet_(monthKey) {
   let sheet = ss.getSheetByName(sheetName);
   if (!sheet) {
     sheet = ss.insertSheet(sheetName);
-  } else {
-    sheet.clear();
-    const merged = sheet.getRange(1, 1).getMergedRanges();
-    merged.forEach(function(range) { range.breakApart(); });
   }
+
+  unmergeWholeSheet_(sheet);
+  sheet.clear();
 
   const year = Number(monthKey.split('-')[0]);
   const month = Number(monthKey.split('-')[1]);
   const daysInMonth = new Date(year, month, 0).getDate();
   const monthLabel = Utilities.formatDate(new Date(year, month - 1, 1), Session.getScriptTimeZone(), 'MMMM yyyy');
-
-  const totalColumns = daysInMonth + 2;
-  sheet.getRange(1, 1, 1, totalColumns).merge();
-  sheet.getRange(1, 1).setValue('Журнал посещаемости — ' + capitalize_(monthLabel));
-  sheet.getRange(1, 1).setFontWeight('bold').setFontSize(14).setHorizontalAlignment('center').setVerticalAlignment('middle');
-
   const headers = ['№', 'Список обучающихся'];
-  for (let d = 1; d <= daysInMonth; d++) {
-    headers.push(d);
+
+  for (let day = 1; day <= daysInMonth; day++) {
+    headers.push(day);
   }
+
+  sheet.getRange(1, 1).setValue('Журнал посещаемости');
+  sheet.getRange(1, 2).setValue(capitalize_(monthLabel));
+  sheet.getRange(1, 1, 1, headers.length)
+    .setFontWeight('bold')
+    .setBackground('#dce9ff')
+    .setHorizontalAlignment('center')
+    .setVerticalAlignment('middle');
+
   sheet.getRange(2, 1, 1, headers.length).setValues([headers]);
-  sheet.getRange(2, 1, 1, headers.length).setFontWeight('bold').setHorizontalAlignment('center');
+  sheet.getRange(2, 1, 1, headers.length)
+    .setFontWeight('bold')
+    .setBackground('#eef4ff')
+    .setHorizontalAlignment('center')
+    .setVerticalAlignment('middle');
 
   const map = {};
   rows.forEach(function(row) {
@@ -523,51 +538,75 @@ function rebuildMonthSheet_(monthKey) {
 
   const values = [];
   const notes = [];
+  const backgrounds = [];
+
   students.forEach(function(student, index) {
     const rowValues = [index + 1, student.fullName];
     const rowNotes = ['', ''];
+    const rowBackgrounds = [index % 2 === 0 ? '#ffffff' : '#f8fbff', index % 2 === 0 ? '#ffffff' : '#f8fbff'];
+
     for (let day = 1; day <= daysInMonth; day++) {
       const rec = map[student.studentId] && map[student.studentId][day];
       if (!rec) {
         rowValues.push('');
         rowNotes.push('');
+        rowBackgrounds.push(index % 2 === 0 ? '#ffffff' : '#f8fbff');
       } else if (rec.status === 'absent') {
         rowValues.push('Н');
         const noteParts = [];
         if (rec.reason) noteParts.push('Причина: ' + rec.reason);
         if (rec.comment) noteParts.push('Комментарий: ' + rec.comment);
         rowNotes.push(noteParts.join('\n'));
+        rowBackgrounds.push('#ffe4ea');
       } else {
         rowValues.push('✓');
         rowNotes.push('');
+        rowBackgrounds.push('#e3f7ef');
       }
     }
+
     values.push(rowValues);
     notes.push(rowNotes);
+    backgrounds.push(rowBackgrounds);
   });
 
   if (values.length) {
     sheet.getRange(3, 1, values.length, headers.length).setValues(values);
     sheet.getRange(3, 1, notes.length, headers.length).setNotes(notes);
+    sheet.getRange(3, 1, backgrounds.length, headers.length).setBackgrounds(backgrounds);
   }
 
   sheet.setFrozenRows(2);
   sheet.setFrozenColumns(2);
-  sheet.setColumnWidth(1, 42);
-  sheet.setColumnWidth(2, 220);
+  sheet.setColumnWidth(1, 44);
+  sheet.setColumnWidth(2, 230);
   for (let c = 3; c <= headers.length; c++) {
-    sheet.setColumnWidth(c, 36);
+    sheet.setColumnWidth(c, 38);
   }
 
-  if (sheet.getMaxRows() < values.length + 3) {
-    sheet.insertRowsAfter(sheet.getMaxRows(), values.length + 3 - sheet.getMaxRows());
+  sheet.setRowHeights(1, 1, 30);
+  sheet.setRowHeights(2, 1, 30);
+
+  if (sheet.getMaxRows() < values.length + 4) {
+    sheet.insertRowsAfter(sheet.getMaxRows(), values.length + 4 - sheet.getMaxRows());
   }
 
-  sheet.getRange(2, 1, Math.max(values.length + 1, 2), headers.length)
+  sheet.getRange(1, 1, Math.max(values.length + 2, 2), headers.length)
     .setBorder(true, true, true, true, true, true)
-    .setHorizontalAlignment('center')
     .setVerticalAlignment('middle');
-  sheet.getRange(3, 2, Math.max(values.length, 1), 1).setHorizontalAlignment('left');
+  if (values.length) {
+    sheet.getRange(3, 2, values.length, 1).setHorizontalAlignment('left');
+    sheet.getRange(3, 3, values.length, headers.length - 2).setHorizontalAlignment('center');
+  }
+}
+
+function unmergeWholeSheet_(sheet) {
+  const maxRows = Math.max(sheet.getMaxRows(), 1);
+  const maxColumns = Math.max(sheet.getMaxColumns(), 1);
+  const mergedRanges = sheet.getRange(1, 1, maxRows, maxColumns).getMergedRanges();
+  mergedRanges.forEach(function(range) {
+    range.breakApart();
+  });
 }
 
 function normalizeDate_(date) {
