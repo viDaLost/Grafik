@@ -1,100 +1,137 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="ru">
 <head>
-  <meta charset="utf-8">
+  <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <title>Журнал посещаемости</title>
-  <meta name="theme-color" content="#10131c">
-  <link rel="stylesheet" href="./styles.css">
+  <title>Журнал посещения</title>
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
   <script src="./config.js"></script>
+  <link rel="stylesheet" href="./styles.css">
 </head>
 <body>
   <div class="app-shell">
-    <header class="hero-card">
-      <div>
-        <p class="eyebrow">Telegram Mini App</p>
-        <h1>Журнал посещаемости</h1>
-        <p class="hero-subtitle">Отмечайте присутствие, фиксируйте причины отсутствия и храните всё в Google Таблице.</p>
-      </div>
-      <div class="hero-badge" id="userBadge">Загрузка…</div>
-    </header>
-
-    <section class="controls-grid">
-      <div class="glass-card control-card">
-        <label for="lessonDate">Дата занятия</label>
-        <input id="lessonDate" type="date">
+    <header class="top-card card">
+      <div class="top-row">
+        <div>
+          <div class="eyebrow">Telegram Mini App</div>
+          <h1>Журнал посещения</h1>
+          <p class="top-subtitle">Быстрая отметка присутствия, причин отсутствия и история занятий в Google Таблице.</p>
+        </div>
+        <div class="user-chip" id="userBadge">Вход…</div>
       </div>
 
-      <div class="glass-card stats-card-row">
-        <div class="stat-box">
+      <div class="quick-grid">
+        <div class="quick-card">
+          <span>Дата занятия</span>
+          <input type="date" id="lessonDate">
+        </div>
+        <div class="quick-card stat-card">
           <span>Всего</span>
           <strong id="statTotal">0</strong>
         </div>
-        <div class="stat-box success">
+        <div class="quick-card stat-card success">
           <span>Были</span>
           <strong id="statPresent">0</strong>
         </div>
-        <div class="stat-box danger">
+        <div class="quick-card stat-card danger">
           <span>Не были</span>
           <strong id="statAbsent">0</strong>
         </div>
       </div>
-    </section>
+    </header>
 
-    <nav class="tabs">
-      <button class="tab active" data-tab="attendance">Посещение</button>
-      <button class="tab" data-tab="students">Ученики</button>
-      <button class="tab" data-tab="history">История</button>
+    <nav class="segmented card" aria-label="Разделы">
+      <button class="segmented-btn active" data-tab="attendance">Посещение</button>
+      <button class="segmented-btn" data-tab="students">Ученики</button>
+      <button class="segmented-btn" data-tab="history">История</button>
     </nav>
 
     <main>
       <section class="tab-panel active" id="panel-attendance">
-        <div class="panel-toolbar">
-          <div>
-            <h2>Отметки за день</h2>
-            <p>По умолчанию все отмечены как присутствующие. Для отсутствующих укажите причину.</p>
+        <section class="card section-card">
+          <div class="section-heading">
+            <div>
+              <h2>Отметки за день</h2>
+              <p>Компактный режим для телефона: быстро переключайте статус, а причину отсутствия редактируйте отдельно.</p>
+            </div>
+            <div class="actions-grid">
+              <button class="secondary-btn" id="markAllPresentBtn">Отметить всех как присутствующих</button>
+              <button class="primary-btn" id="saveBtn">Сохранить журнал</button>
+            </div>
           </div>
-          <div class="toolbar-actions">
-            <button class="secondary-btn" id="markAllPresentBtn">Все были</button>
-            <button class="primary-btn" id="saveBtn">Сохранить журнал</button>
+
+          <div class="toolbar-stack">
+            <input type="search" id="searchInput" placeholder="Поиск ученика по имени">
+            <div class="filter-row" id="filterRow">
+              <button class="filter-chip active" data-filter="all">Все</button>
+              <button class="filter-chip" data-filter="absent">Только отсутствующие</button>
+              <button class="filter-chip" data-filter="present">Только присутствующие</button>
+            </div>
           </div>
-        </div>
-        <div id="studentsList" class="student-list"></div>
+
+          <div id="studentsList" class="attendance-list"></div>
+        </section>
       </section>
 
       <section class="tab-panel" id="panel-students">
-        <div class="panel-toolbar">
-          <div>
-            <h2>Список учеников</h2>
-            <p>Можно добавлять новых учеников и удалять лишних. Из таблицы они тоже удаляются.</p>
+        <section class="card section-card">
+          <div class="section-heading compact-gap">
+            <div>
+              <h2>Ученики</h2>
+              <p>Здесь можно быстро добавить нового ученика или удалить лишнего. Из таблицы запись тоже удаляется.</p>
+            </div>
           </div>
-        </div>
 
-        <div class="glass-card add-student-card">
-          <input type="text" id="newStudentName" placeholder="Имя нового ученика">
-          <button class="primary-btn" id="addStudentBtn">Добавить</button>
-        </div>
+          <div class="add-row">
+            <input type="text" id="newStudentName" placeholder="Имя нового ученика">
+            <button class="primary-btn" id="addStudentBtn">Добавить</button>
+          </div>
 
-        <div id="studentsAdminList" class="admin-list"></div>
+          <div id="studentsAdminList" class="students-admin-list"></div>
+        </section>
       </section>
 
       <section class="tab-panel" id="panel-history">
-        <div class="panel-toolbar">
-          <div>
-            <h2>История месяца</h2>
-            <p>Краткая сводка по сохранённым датам текущего месяца.</p>
+        <section class="card section-card">
+          <div class="section-heading compact-gap">
+            <div>
+              <h2>История месяца</h2>
+              <p>Краткая сводка по сохранённым датам текущего месяца.</p>
+            </div>
           </div>
-        </div>
 
-        <div class="glass-card">
           <div id="historyList" class="history-list"></div>
-        </div>
+        </section>
       </section>
     </main>
   </div>
 
-  <div class="loading-overlay" id="loadingOverlay">
+  <div class="modal-overlay hidden" id="reasonModal">
+    <div class="modal-card">
+      <div class="modal-header">
+        <div>
+          <div class="eyebrow">Причина отсутствия</div>
+          <h3 id="modalStudentName">Ученик</h3>
+        </div>
+        <button class="icon-btn" id="closeModalBtn" aria-label="Закрыть">✕</button>
+      </div>
+
+      <div class="modal-body">
+        <label class="field-label" for="reasonSelect">Причина</label>
+        <select id="reasonSelect"></select>
+
+        <label class="field-label" for="reasonComment">Комментарий</label>
+        <textarea id="reasonComment" placeholder="Например: предупредили заранее, болеет, уехал(а)"></textarea>
+      </div>
+
+      <div class="modal-actions">
+        <button class="secondary-btn" id="markPresentFromModalBtn">Вернуть в присутствующие</button>
+        <button class="primary-btn" id="saveReasonBtn">Сохранить причину</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="loading-overlay hidden" id="loadingOverlay">
     <div class="loader-card">
       <div class="spinner"></div>
       <p id="loadingText">Загрузка…</p>
