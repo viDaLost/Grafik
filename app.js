@@ -183,12 +183,27 @@ function normalizeRecords(students, serverRecords, fillMissingRecords = true) {
   return map;
 }
 
+
+function getLocalAdminTelegramIds() {
+  const ids = window.APP_CONFIG && Array.isArray(window.APP_CONFIG.ADMIN_TELEGRAM_IDS)
+    ? window.APP_CONFIG.ADMIN_TELEGRAM_IDS
+    : [];
+  return ids.map((item) => String(item || '').trim()).filter(Boolean);
+}
+
+function isLocalAdminUser(user) {
+  if (!user || !user.id) return false;
+  return getLocalAdminTelegramIds().includes(String(user.id).trim());
+}
+
 function applyPayload(payload) {
   state.user = payload.user || null;
   state.date = payload.date;
   state.students = payload.students || [];
   state.history = payload.history || [];
-  state.canEdit = Boolean(payload.canEdit || payload.user?.isAdmin);
+  const serverSaysCanEdit = Boolean(payload.canEdit || payload.user?.isAdmin);
+  const localFallbackCanEdit = isLocalAdminUser(payload.user || null);
+  state.canEdit = serverSaysCanEdit || localFallbackCanEdit;
   state.dateHasRecords = Boolean(payload.dateHasRecords || (payload.records || []).length);
   state.records = normalizeRecords(state.students, payload.records || [], state.canEdit);
   state.dirty = false;

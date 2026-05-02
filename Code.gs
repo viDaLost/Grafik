@@ -179,7 +179,12 @@ function normalizeList_(items) {
 }
 
 function getAdminTelegramIds_() {
-  return normalizeList_(APP_CONFIG.ADMIN_TELEGRAM_IDS || APP_CONFIG.ALLOWED_TELEGRAM_IDS || []);
+  // Старые версии проекта хранили админов в ALLOWED_TELEGRAM_IDS.
+  // Новая версия хранит админов в ADMIN_TELEGRAM_IDS.
+  // Объединяем оба списка, чтобы админ не потерял права после обновления.
+  const fromAdminList = normalizeList_(APP_CONFIG.ADMIN_TELEGRAM_IDS || []);
+  const fromOldAllowedList = normalizeList_(APP_CONFIG.ALLOWED_TELEGRAM_IDS || []);
+  return Array.from(new Set(fromAdminList.concat(fromOldAllowedList)));
 }
 
 function getAdminTelegramUsernames_() {
