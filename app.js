@@ -24,7 +24,8 @@ const state = {
   editingStudentId: null,
   openedHistoryDate: null,
   canEdit: false,
-  dateHasRecords: false
+  dateHasRecords: false,
+  lessonNote: ''
 };
 
 const els = {
@@ -43,6 +44,8 @@ const els = {
   userBadge: document.getElementById('userBadge'),
   accessNote: document.getElementById('accessNote'),
   attendanceHelp: document.getElementById('attendanceHelp'),
+  lessonNoteInput: document.getElementById('lessonNoteInput'),
+  lessonNoteView: document.getElementById('lessonNoteView'),
   studentsHelp: document.getElementById('studentsHelp'),
   historyHelp: document.getElementById('historyHelp'),
   loadingOverlay: document.getElementById('loadingOverlay'),
@@ -205,6 +208,7 @@ function applyPayload(payload) {
   const localFallbackCanEdit = isLocalAdminUser(payload.user || null);
   state.canEdit = serverSaysCanEdit || localFallbackCanEdit;
   state.dateHasRecords = Boolean(payload.dateHasRecords || (payload.records || []).length);
+  state.lessonNote = String(payload.lessonNote || '');
   state.records = normalizeRecords(state.students, payload.records || [], state.canEdit);
   state.dirty = false;
   els.lessonDate.value = state.date;
@@ -216,6 +220,7 @@ function applyPayload(payload) {
 
 function renderAll() {
   renderAccessMode();
+  renderLessonNote();
   renderStats();
   renderTabs();
   renderAttendance();
@@ -275,6 +280,22 @@ function ensureCanEdit() {
   if (state.canEdit) return true;
   showToast('У тебя режим просмотра. Изменения доступны только админам.');
   return false;
+}
+
+function renderLessonNote() {
+  if (!els.lessonNoteInput || !els.lessonNoteView) return;
+
+  const noteText = String(state.lessonNote || '').trim();
+  els.lessonNoteInput.value = noteText;
+
+  setElementHidden(els.lessonNoteInput, !state.canEdit);
+  setElementHidden(els.lessonNoteView, state.canEdit);
+
+  if (!state.canEdit) {
+    els.lessonNoteView.textContent = noteText
+      ? noteText
+      : (state.dateHasRecords ? 'Комментарий к занятию не указан.' : 'За эту дату журнал ещё не сохранён.');
+  }
 }
 
 function renderStats() {
@@ -413,6 +434,7 @@ function renderHistory() {
           <span class="metric-pill">Были: ${row.present}</span>
           <span class="metric-pill danger">Не были: ${row.absent}</span>
         </div>
+        ${row.lessonNote ? `<div class="history-note-line">${escapeHtml(row.lessonNote)}</div>` : ''}
       </div>
       <div class="history-actions-col">
         <button class="outline-btn" data-history-details="${row.date}">Точный список</button>
@@ -535,6 +557,7 @@ function openHistoryModal(date) {
       <span class="metric-pill">Были: ${entry.present}</span>
       <span class="metric-pill danger">Не были: ${entry.absent}</span>
     </div>
+    ${entry.lessonNote ? `<div class="history-modal-note"><strong>Комментарий к занятию</strong><span>${escapeHtml(entry.lessonNote)}</span></div>` : ''}
     <div class="history-details-grid">
       <section class="history-details-block">
         <h4>Были</h4>
@@ -569,7 +592,7 @@ async function saveJournal() {
   try {
     const payload = await api(
       'saveAttendance',
-      { date: state.date, records: collectRecordsForSave() },
+      { date: state.date, records: collectRecordsForSave(), lessonNote: state.lessonNote.trim() },
       'Сохраняем журнал…'
     );
     applyPayload(payload);
@@ -694,6 +717,14 @@ function bindUI() {
       showToast(error.message || 'Не удалось загрузить дату');
     }
   });
+
+  if (els.lessonNoteInput) {
+    els.lessonNoteInput.addEventListener('input', () => {
+      if (!state.canEdit) return;
+      state.lessonNote = els.lessonNoteInput.value || '';
+      state.dirty = true;
+    });
+  }
 
   els.searchInput.addEventListener('input', () => {
     state.search = els.searchInput.value || '';

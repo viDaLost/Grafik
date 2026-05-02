@@ -71,7 +71,7 @@ function doPost(e) {
 
       case 'saveAttendance':
         assertAdmin_(auth.user);
-        saveAttendance_(payload.date, payload.records || [], auth.user);
+        saveAttendance_(payload.date, payload.records || [], auth.user, payload.lessonNote || '');
         return jsonResponse_(buildInitPayload_(payload.date, auth.user, 'Журнал сохранён'));
 
       case 'addStudent':
@@ -260,7 +260,7 @@ function ensureSetup_() {
   let attendanceSheet = ss.getSheetByName(APP_CONFIG.ATTENDANCE_SHEET);
   if (!attendanceSheet) {
     attendanceSheet = ss.insertSheet(APP_CONFIG.ATTENDANCE_SHEET);
-    attendanceSheet.getRange(1, 1, 1, 9).setValues([[
+    attendanceSheet.getRange(1, 1, 1, 10).setValues([[
       'date',
       'monthKey',
       'studentId',
@@ -269,12 +269,28 @@ function ensureSetup_() {
       'reason',
       'comment',
       'updatedAt',
-      'updatedByTelegramId'
+      'updatedByTelegramId',
+      'lessonNote'
     ]]);
     attendanceSheet.setFrozenRows(1);
-    attendanceSheet.getRange('A:I').setNumberFormat('@');
-    attendanceSheet.autoResizeColumns(1, 9);
+    attendanceSheet.getRange('A:J').setNumberFormat('@');
+    attendanceSheet.autoResizeColumns(1, 10);
+  } else {
+    migrateAttendanceSheet_(attendanceSheet);
   }
+}
+
+function migrateAttendanceSheet_(attendanceSheet) {
+  const headerWidth = Math.max(attendanceSheet.getLastColumn(), 10);
+  const headers = attendanceSheet.getRange(1, 1, 1, headerWidth).getValues()[0]
+    .map(function(value) { return String(value || '').trim(); });
+
+  if (headers[9] !== 'lessonNote') {
+    attendanceSheet.getRange(1, 10).setValue('lessonNote');
+  }
+
+  attendanceSheet.getRange('A:J').setNumberFormat('@');
+  attendanceSheet.autoResizeColumns(1, 10);
 }
 
 function buildInitPayload_(date, user, toastMessage) {
@@ -287,6 +303,7 @@ function buildInitPayload_(date, user, toastMessage) {
     return Object.assign({}, student, counters);
   });
   const records = getDayRecordsFromRows_(attendanceRows, normalizedDate);
+  const lessonNote = getDayLessonNoteFromRows_(attendanceRows, normalizedDate);
   const history = buildAllHistory_(attendanceRows, studentsWithStats);
   const stats = buildStats_(studentsWithStats, records);
 
@@ -304,6 +321,7 @@ function buildInitPayload_(date, user, toastMessage) {
     canEdit: isAdminUser_(user),
     students: studentsWithStats,
     records: records,
+    lessonNote: lessonNote,
     dateHasRecords: records.length > 0,
     history: history,
     stats: stats,
@@ -338,7 +356,7 @@ function getAttendanceRows_() {
   const lastRow = sheet.getLastRow();
   if (lastRow < 2) return [];
 
-  const values = sheet.getRange(2, 1, lastRow - 1, 9).getValues();
+  const values = sheet.getRange(2, 1, lastRow - 1, Math.max(sheet.getLastColumn(), 10)).getValues();
   return values.map(function(row, index) {
     const normalizedDate = normalizeSheetDateValue_(row[0]);
     const monthKey = normalizeSheetMonthKeyValue_(row[1], normalizedDate);
@@ -352,7 +370,8 @@ function getAttendanceRows_() {
       reason: String(row[5] || '').trim(),
       comment: String(row[6] || '').trim(),
       updatedAt: row[7],
-      updatedByTelegramId: String(row[8] || '').trim()
+      updatedByTelegramId: String(row[8] || '').trim(),
+      lessonNote: String(row[9] || '').trim()
     };
   }).filter(function(row) {
     return !!row.date && !!row.studentId;
@@ -419,6 +438,14 @@ function getDayRecordsFromRows_(attendanceRows, date) {
     });
 }
 
+function getDayLessonNoteFromRows_(attendanceRows, date) {
+  const normalizedDate = normalizeDate_(date);
+  const row = (attendanceRows || []).find(function(item) {
+    return item.date === normalizedDate && item.lessonNote;
+  });
+  return row ? row.lessonNote : '';
+}
+
 function buildStudentCountersById_(students, attendanceRows) {
   const countersById = {};
   students.forEach(function(student) {
@@ -458,6 +485,7 @@ function buildAllHistory_(attendanceRows, students) {
         total: 0,
         present: 0,
         absent: 0,
+        lessonNote: '',
         presentList: [],
         absentList: []
       };
@@ -465,6 +493,9 @@ function buildAllHistory_(attendanceRows, students) {
 
     const group = grouped[row.date];
     group.total += 1;
+    if (!group.lessonNote && row.lessonNote) {
+      group.lessonNote = row.lessonNote;
+    }
 
     if (row.status === 'absent') {
       group.absent += 1;
@@ -606,10 +637,11 @@ function clearHistory_() {
   deleteAllJournalSheets_();
 }
 
-function saveAttendance_(date, records, user) {
+function saveAttendance_(date, records, user, lessonNote) {
   const normalizedDate = normalizeDate_(date);
   const monthKey = getMonthKey_(normalizedDate);
   const students = getStudents_();
+  const lessonNoteText = String(lessonNote || '').trim();
 
   const recordsById = {};
   (records || []).forEach(function(item) {
@@ -630,7 +662,8 @@ function saveAttendance_(date, records, user) {
       status === 'absent' ? String(incoming.reason || '').trim() : '',
       status === 'absent' ? String(incoming.comment || '').trim() : '',
       new Date().toISOString(),
-      String(user.id)
+      String(user.id),
+      lessonNoteText
     ];
   });
 
@@ -739,6 +772,15 @@ function rebuildMonthSheet_(monthKey, allAttendanceRows) {
     return row.monthKey === monthKey;
   });
 
+  const lessonNotesByDay = {};
+  rows.forEach(function(row) {
+    if (!row.date || !row.lessonNote) return;
+    const day = Number(row.date.split('-')[2]);
+    if (day >= 1 && day <= new Date(Number(monthKey.split('-')[0]), Number(monthKey.split('-')[1]), 0).getDate()) {
+      lessonNotesByDay[day] = row.lessonNote;
+    }
+  });
+
   const ss = SpreadsheetApp.openById(APP_CONFIG.SPREADSHEET_ID);
   const sheetName = getJournalSheetName_(monthKey);
   let sheet = ss.getSheetByName(sheetName);
@@ -772,6 +814,13 @@ function rebuildMonthSheet_(monthKey, allAttendanceRows) {
     .setBackground('#eef4ff')
     .setHorizontalAlignment('center')
     .setVerticalAlignment('middle');
+
+  const headerNotes = headers.map(function(header, index) {
+    if (index < 2) return '';
+    const dayNumber = Number(header);
+    return lessonNotesByDay[dayNumber] ? 'Комментарий к занятию: ' + lessonNotesByDay[dayNumber] : '';
+  });
+  sheet.getRange(2, 1, 1, headers.length).setNotes([headerNotes]);
 
   const map = {};
   rows.forEach(function(row) {
@@ -849,6 +898,29 @@ function rebuildMonthSheet_(monthKey, allAttendanceRows) {
     if (headers.length > 2) {
       sheet.getRange(3, 3, values.length, headers.length - 2).setHorizontalAlignment('center');
     }
+  }
+
+  const noteDays = Object.keys(lessonNotesByDay).map(Number).sort(function(a, b) { return a - b; });
+  if (noteDays.length) {
+    const notesStartRow = values.length + 5;
+    const noteRows = noteDays.map(function(day) {
+      const isoDate = [monthKey, pad2_(day)].join('-');
+      return [isoDate, lessonNotesByDay[day]];
+    });
+
+    sheet.getRange(notesStartRow, 1, 1, 2)
+      .setValues([['Комментарии к датам', '']])
+      .setFontWeight('bold')
+      .setBackground('#dce9ff');
+    sheet.getRange(notesStartRow + 1, 1, 1, 2)
+      .setValues([['Дата', 'Комментарий']])
+      .setFontWeight('bold')
+      .setBackground('#eef4ff');
+    sheet.getRange(notesStartRow + 2, 1, noteRows.length, 2).setValues(noteRows);
+    sheet.getRange(notesStartRow, 1, noteRows.length + 2, 2)
+      .setBorder(true, true, true, true, true, true)
+      .setVerticalAlignment('middle');
+    sheet.getRange(notesStartRow + 2, 2, noteRows.length, 1).setWrap(true);
   }
 }
 

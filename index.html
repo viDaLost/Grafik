@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <title>Журнал посещаемости</title>
+  <title>Журнал посещения</title>
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
   <script src="./config.js"></script>
   <link rel="stylesheet" href="./styles.css">
@@ -14,7 +14,7 @@
       <div class="top-row">
         <div>
           <div class="eyebrow">Telegram Mini App</div>
-          <h1>Журнал посещаемости</h1>
+          <h1>Журнал посещения</h1>
           <p class="top-subtitle">📝</p>
         </div>
         <div class="user-chip" id="userBadge">Вход…</div>
@@ -60,6 +60,12 @@
               <button class="secondary-btn" id="markAllPresentBtn">Отметить всех как присутствующих</button>
               <button class="primary-btn" id="saveBtn">Сохранить журнал</button>
             </div>
+          </div>
+
+          <div class="lesson-note-card">
+            <label class="field-label" for="lessonNoteInput">Комментарий или дополнение к занятию</label>
+            <textarea id="lessonNoteInput" placeholder="Например: мастер-класс, торжественное собрание, нерабочее занятие"></textarea>
+            <div class="lesson-note-view" id="lessonNoteView">Комментарий к занятию не указан.</div>
           </div>
 
           <div class="toolbar-stack">
