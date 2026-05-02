@@ -225,7 +225,8 @@ function renderAccessMode() {
   document.body.classList.toggle('read-only-mode', !isAdmin);
 
   if (els.userBadge) {
-    els.userBadge.textContent = (isAdmin ? 'Админ: ' : 'Просмотр: ') + getCurrentUserDisplayName();
+    const idText = state.user?.id ? ' · ID ' + state.user.id : '';
+    els.userBadge.textContent = (isAdmin ? 'Админ: ' : 'Просмотр: ') + getCurrentUserDisplayName() + idText;
   }
   if (els.accessNote) {
     els.accessNote.textContent = isAdmin

@@ -2,6 +2,7 @@ const APP_CONFIG = {
   SPREADSHEET_ID: '10bPN4_Ag0Y7KMwWm1mjb_9KCFJ4ktqqyrvm-6RGAnuQ',
   ALLOWED_TELEGRAM_IDS: ['26156823', '1288379477'],
   ADMIN_TELEGRAM_IDS: ['26156823', '1288379477'],
+  ADMIN_TELEGRAM_USERNAMES: [],
   STUDENTS_SHEET: 'Ученики',
   ATTENDANCE_SHEET: 'Посещения',
   JOURNAL_PREFIX: 'Журнал ',
@@ -171,13 +172,36 @@ function validateTelegramRequest_(initDataRaw) {
   return { ok: true, user: user, isAdmin: isAdminUser_(user) };
 }
 
+function normalizeList_(items) {
+  return (items || [])
+    .map(function(item) { return String(item || '').trim(); })
+    .filter(function(item) { return !!item; });
+}
+
 function getAdminTelegramIds_() {
-  return APP_CONFIG.ADMIN_TELEGRAM_IDS || APP_CONFIG.ALLOWED_TELEGRAM_IDS || [];
+  return normalizeList_(APP_CONFIG.ADMIN_TELEGRAM_IDS || APP_CONFIG.ALLOWED_TELEGRAM_IDS || []);
+}
+
+function getAdminTelegramUsernames_() {
+  return normalizeList_(APP_CONFIG.ADMIN_TELEGRAM_USERNAMES || []).map(function(username) {
+    return username.replace(/^@/, '').toLowerCase();
+  });
 }
 
 function isAdminUser_(user) {
   if (!user || !user.id) return false;
-  return getAdminTelegramIds_().indexOf(String(user.id)) !== -1;
+
+  const userId = String(user.id).trim();
+  if (getAdminTelegramIds_().indexOf(userId) !== -1) {
+    return true;
+  }
+
+  const username = String(user.username || '').replace(/^@/, '').toLowerCase().trim();
+  if (username && getAdminTelegramUsernames_().indexOf(username) !== -1) {
+    return true;
+  }
+
+  return false;
 }
 
 function assertAdmin_(user) {
