@@ -642,3 +642,47 @@ textarea { min-height: 110px; resize: vertical; }
     min-width: 0;
   }
 }
+
+.access-note {
+  margin-top: 12px;
+  padding: 12px 14px;
+  border-radius: 18px;
+  background: rgba(255,255,255,0.78);
+  border: 1px solid var(--line);
+  color: #40516f;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.35;
+}
+
+.read-only-mode .section-card {
+  border-color: rgba(59,130,246,0.18);
+}
+
+.view-status-pill {
+  min-height: 42px;
+  padding: 0 14px;
+  border-radius: 999px;
+  font-weight: 800;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  white-space: nowrap;
+}
+.view-status-pill.present {
+  background: #e3f7ef;
+  color: #15774f;
+}
+.view-status-pill.absent {
+  background: #ffe9ee;
+  color: #bc405c;
+}
+.row-actions.view-only {
+  align-items: flex-end;
+}
+
+@media (max-width: 760px) {
+  .view-status-pill {
+    width: 100%;
+  }
+}

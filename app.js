@@ -22,7 +22,9 @@ const state = {
   search: '',
   dirty: false,
   editingStudentId: null,
-  openedHistoryDate: null
+  openedHistoryDate: null,
+  canEdit: false,
+  dateHasRecords: false
 };
 
 const els = {
@@ -39,6 +41,10 @@ const els = {
   markAllPresentBtn: document.getElementById('markAllPresentBtn'),
   clearHistoryBtn: document.getElementById('clearHistoryBtn'),
   userBadge: document.getElementById('userBadge'),
+  accessNote: document.getElementById('accessNote'),
+  attendanceHelp: document.getElementById('attendanceHelp'),
+  studentsHelp: document.getElementById('studentsHelp'),
+  historyHelp: document.getElementById('historyHelp'),
   loadingOverlay: document.getElementById('loadingOverlay'),
   loadingText: document.getElementById('loadingText'),
   toast: document.getElementById('toast'),
@@ -147,7 +153,7 @@ async function api(action, extra = {}, loadingText = 'Загрузка…') {
   }
 }
 
-function normalizeRecords(students, serverRecords) {
+function normalizeRecords(students, serverRecords, fillMissingRecords = true) {
   const map = new Map();
 
   (serverRecords || []).forEach((rec) => {
@@ -160,17 +166,19 @@ function normalizeRecords(students, serverRecords) {
     });
   });
 
-  students.forEach((student) => {
-    if (!map.has(student.studentId)) {
-      map.set(student.studentId, {
-        studentId: student.studentId,
-        studentName: student.fullName,
-        status: 'present',
-        reason: '',
-        comment: ''
-      });
-    }
-  });
+  if (fillMissingRecords) {
+    students.forEach((student) => {
+      if (!map.has(student.studentId)) {
+        map.set(student.studentId, {
+          studentId: student.studentId,
+          studentName: student.fullName,
+          status: 'present',
+          reason: '',
+          comment: ''
+        });
+      }
+    });
+  }
 
   return map;
 }
@@ -179,8 +187,10 @@ function applyPayload(payload) {
   state.user = payload.user || null;
   state.date = payload.date;
   state.students = payload.students || [];
-  state.records = normalizeRecords(state.students, payload.records || []);
   state.history = payload.history || [];
+  state.canEdit = Boolean(payload.canEdit || payload.user?.isAdmin);
+  state.dateHasRecords = Boolean(payload.dateHasRecords || (payload.records || []).length);
+  state.records = normalizeRecords(state.students, payload.records || [], state.canEdit);
   state.dirty = false;
   els.lessonDate.value = state.date;
   renderAll();
@@ -190,6 +200,7 @@ function applyPayload(payload) {
 }
 
 function renderAll() {
+  renderAccessMode();
   renderStats();
   renderTabs();
   renderAttendance();
@@ -197,8 +208,71 @@ function renderAll() {
   renderHistory();
 }
 
+function getCurrentUserDisplayName() {
+  if (!state.user) return 'Пользователь';
+  return [state.user.first_name, state.user.last_name].filter(Boolean).join(' ')
+    || state.user.username
+    || 'Пользователь';
+}
+
+function setElementHidden(element, isHidden) {
+  if (!element) return;
+  element.hidden = isHidden;
+}
+
+function renderAccessMode() {
+  const isAdmin = state.canEdit;
+  document.body.classList.toggle('read-only-mode', !isAdmin);
+
+  if (els.userBadge) {
+    els.userBadge.textContent = (isAdmin ? 'Админ: ' : 'Просмотр: ') + getCurrentUserDisplayName();
+  }
+  if (els.accessNote) {
+    els.accessNote.textContent = isAdmin
+      ? 'Режим администратора: отметки, ученики и история доступны для изменения.'
+      : 'Режим просмотра: ты видишь журнал и историю занятий, изменения доступны только админам.';
+  }
+  if (els.attendanceHelp) {
+    els.attendanceHelp.textContent = isAdmin
+      ? 'Отмечайте посещение за выбранную дату. После проверки сохраните журнал.'
+      : 'Здесь видно, кто был на занятии за выбранную дату и кто отсутствовал.';
+  }
+  if (els.studentsHelp) {
+    els.studentsHelp.textContent = isAdmin
+      ? 'Добавляйте новых участников и удаляйте лишних. Счётчики показывают посещения и пропуски.'
+      : 'Здесь открыт список учеников и их счётчики посещений и пропусков.';
+  }
+  if (els.historyHelp) {
+    els.historyHelp.textContent = isAdmin
+      ? 'Здесь показываются все сохранённые даты. Точный список, удаление даты и очистка истории доступны админам.'
+      : 'Здесь показываются все сохранённые даты. Открой точный список, чтобы посмотреть посещение поимённо.';
+  }
+
+  setElementHidden(els.markAllPresentBtn, !isAdmin);
+  setElementHidden(els.saveBtn, !isAdmin);
+  setElementHidden(els.addStudentBtn, !isAdmin);
+  setElementHidden(els.newStudentName, !isAdmin);
+  setElementHidden(els.clearHistoryBtn, !isAdmin);
+}
+
+function ensureCanEdit() {
+  if (state.canEdit) return true;
+  showToast('У тебя режим просмотра. Изменения доступны только админам.');
+  return false;
+}
+
 function renderStats() {
   const values = Array.from(state.records.values());
+
+  if (!state.canEdit) {
+    const absent = values.filter((item) => item.status === 'absent').length;
+    const present = values.filter((item) => item.status !== 'absent').length;
+    els.statTotal.textContent = String(values.length);
+    els.statPresent.textContent = String(present);
+    els.statAbsent.textContent = String(absent);
+    return;
+  }
+
   const absent = values.filter((item) => item.status === 'absent').length;
   const total = state.students.length;
   const present = total - absent;
@@ -210,7 +284,10 @@ function renderStats() {
 
 function getOrderedStudents() {
   const searchValue = state.search.trim().toLowerCase();
-  const students = state.students.slice().sort((a, b) => {
+  const sourceStudents = state.canEdit
+    ? state.students.slice()
+    : state.students.filter((student) => state.records.has(student.studentId));
+  const students = sourceStudents.sort((a, b) => {
     const aAbsent = state.records.get(a.studentId)?.status === 'absent' ? 1 : 0;
     const bAbsent = state.records.get(b.studentId)?.status === 'absent' ? 1 : 0;
     if (aAbsent !== bAbsent) return bAbsent - aAbsent;
@@ -231,7 +308,10 @@ function renderAttendance() {
   const students = getOrderedStudents();
 
   if (!students.length) {
-    els.studentsList.innerHTML = `<div class="empty-state">${state.students.length ? 'По вашему фильтру никто не найден.' : 'Список учеников пуст.'}</div>`;
+    const message = !state.canEdit && !state.dateHasRecords
+      ? 'За эту дату журнал ещё не сохранён.'
+      : (state.students.length ? 'По вашему фильтру никто не найден.' : 'Список учеников пуст.');
+    els.studentsList.innerHTML = `<div class="empty-state">${message}</div>`;
     return;
   }
 
@@ -246,6 +326,15 @@ function renderAttendance() {
     const subtitle = isAbsent ? 'Отмечен как отсутствующий' : 'Отмечен как присутствующий';
     const initials = student.fullName.trim().charAt(0).toUpperCase();
     const counters = `Был(а): ${student.presentCount || 0} · Не был(а): ${student.absentCount || 0}`;
+    const actions = state.canEdit ? `
+          <div class="status-group">
+            <button class="status-btn ${!isAbsent ? 'active-present' : ''}" data-student-id="${student.studentId}" data-status="present">Был(а)</button>
+            <button class="status-btn ${isAbsent ? 'active-absent' : ''}" data-student-id="${student.studentId}" data-status="absent">Не был(а)</button>
+          </div>
+          ${isAbsent ? `<button class="reason-btn" data-edit-reason="${student.studentId}">Изменить причину</button>` : ''}
+        ` : `
+          <div class="view-status-pill ${isAbsent ? 'absent' : 'present'}">${isAbsent ? 'Не был(а)' : 'Был(а)'}</div>
+        `;
 
     return `
       <article class="attendance-row ${isAbsent ? 'absent' : ''}" data-student-id="${student.studentId}">
@@ -265,12 +354,8 @@ function renderAttendance() {
             </div>
           ` : ''}
         </div>
-        <div class="row-actions">
-          <div class="status-group">
-            <button class="status-btn ${!isAbsent ? 'active-present' : ''}" data-student-id="${student.studentId}" data-status="present">Был(а)</button>
-            <button class="status-btn ${isAbsent ? 'active-absent' : ''}" data-student-id="${student.studentId}" data-status="absent">Не был(а)</button>
-          </div>
-          ${isAbsent ? `<button class="reason-btn" data-edit-reason="${student.studentId}">Изменить причину</button>` : ''}
+        <div class="row-actions ${state.canEdit ? '' : 'view-only'}">
+          ${actions}
         </div>
       </article>
     `;
@@ -292,7 +377,7 @@ function renderStudentsAdmin() {
           <span class="metric-pill danger">Не был(а): ${student.absentCount || 0}</span>
         </div>
       </div>
-      <button class="danger-btn" data-delete-student="${student.studentId}">Удалить</button>
+      ${state.canEdit ? `<button class="danger-btn" data-delete-student="${student.studentId}">Удалить</button>` : ''}
     </div>
   `).join('');
 }
@@ -315,7 +400,7 @@ function renderHistory() {
       </div>
       <div class="history-actions-col">
         <button class="outline-btn" data-history-details="${row.date}">Точный список</button>
-        <button class="danger-btn" data-history-delete="${row.date}">Удалить дату</button>
+        ${state.canEdit ? `<button class="danger-btn" data-history-delete="${row.date}">Удалить дату</button>` : ''}
       </div>
     </div>
   `).join('');
@@ -348,6 +433,7 @@ function collectRecordsForSave() {
 }
 
 function setStudentStatus(studentId, status, options = {}) {
+  if (!ensureCanEdit()) return;
   const record = state.records.get(studentId);
   const student = state.students.find((item) => item.studentId === studentId);
   if (!record || !student) return;
@@ -371,6 +457,7 @@ function setStudentStatus(studentId, status, options = {}) {
 }
 
 function openReasonModal(studentId) {
+  if (!ensureCanEdit()) return;
   const student = state.students.find((item) => item.studentId === studentId);
   const record = state.records.get(studentId);
   if (!student || !record) return;
@@ -390,6 +477,7 @@ function closeReasonModal() {
 }
 
 function saveReasonFromModal() {
+  if (!ensureCanEdit()) return;
   if (!state.editingStudentId) return;
   const record = state.records.get(state.editingStudentId);
   if (!record) return;
@@ -404,6 +492,7 @@ function saveReasonFromModal() {
 }
 
 function markPresentFromModal() {
+  if (!ensureCanEdit()) return;
   if (!state.editingStudentId) return;
   setStudentStatus(state.editingStudentId, 'present', { openModal: false });
   closeReasonModal();
@@ -460,6 +549,7 @@ async function loadInitial() {
 }
 
 async function saveJournal() {
+  if (!ensureCanEdit()) return;
   try {
     const payload = await api(
       'saveAttendance',
@@ -475,6 +565,7 @@ async function saveJournal() {
 }
 
 async function addStudent() {
+  if (!ensureCanEdit()) return;
   const name = els.newStudentName.value.trim();
   if (!name) {
     showToast('Введите имя нового ученика');
@@ -493,6 +584,7 @@ async function addStudent() {
 }
 
 async function deleteStudent(studentId) {
+  if (!ensureCanEdit()) return;
   const student = state.students.find((item) => item.studentId === studentId);
   if (!student) return;
   const ok = window.confirm(`Удалить ученика «${student.fullName}»? Он удалится и из таблицы.`);
@@ -507,6 +599,7 @@ async function deleteStudent(studentId) {
 }
 
 async function deleteHistoryDate(date) {
+  if (!ensureCanEdit()) return;
   const ok = window.confirm(`Удалить сохранение за ${formatDateRu(date)}?`);
   if (!ok) return;
 
@@ -520,6 +613,7 @@ async function deleteHistoryDate(date) {
 }
 
 async function clearHistory() {
+  if (!ensureCanEdit()) return;
   if (!state.history.length) {
     showToast('История уже пустая');
     return;
@@ -540,6 +634,7 @@ async function clearHistory() {
 }
 
 function markAllPresent() {
+  if (!ensureCanEdit()) return;
   state.students.forEach((student) => {
     state.records.set(student.studentId, {
       studentId: student.studentId,

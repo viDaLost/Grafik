@@ -1,6 +1,7 @@
 const APP_CONFIG = {
   SPREADSHEET_ID: '10bPN4_Ag0Y7KMwWm1mjb_9KCFJ4ktqqyrvm-6RGAnuQ',
   ALLOWED_TELEGRAM_IDS: ['26156823', '1288379477'],
+  ADMIN_TELEGRAM_IDS: ['26156823', '1288379477'],
   STUDENTS_SHEET: 'Ученики',
   ATTENDANCE_SHEET: 'Посещения',
   JOURNAL_PREFIX: 'Журнал ',
@@ -68,22 +69,27 @@ function doPost(e) {
         return jsonResponse_(buildInitPayload_(payload.date, auth.user));
 
       case 'saveAttendance':
+        assertAdmin_(auth.user);
         saveAttendance_(payload.date, payload.records || [], auth.user);
         return jsonResponse_(buildInitPayload_(payload.date, auth.user, 'Журнал сохранён'));
 
       case 'addStudent':
+        assertAdmin_(auth.user);
         addStudent_(String(payload.name || '').trim(), auth.user);
         return jsonResponse_(buildInitPayload_(payload.date, auth.user, 'Ученик добавлен'));
 
       case 'deleteStudent':
+        assertAdmin_(auth.user);
         deleteStudent_(String(payload.studentId || '').trim());
         return jsonResponse_(buildInitPayload_(payload.date, auth.user, 'Ученик удалён'));
 
       case 'deleteHistoryDate':
+        assertAdmin_(auth.user);
         deleteHistoryDate_(payload.dateToDelete || payload.targetDate || payload.historyDate || '');
         return jsonResponse_(buildInitPayload_(payload.date, auth.user, 'Сохранение за дату удалено'));
 
       case 'clearHistory':
+        assertAdmin_(auth.user);
         clearHistory_();
         return jsonResponse_(buildInitPayload_(payload.date, auth.user, 'История очищена'));
 
@@ -162,11 +168,22 @@ function validateTelegramRequest_(initDataRaw) {
     throw new Error('Не удалось определить пользователя Telegram');
   }
 
-  if (APP_CONFIG.ALLOWED_TELEGRAM_IDS.indexOf(String(user.id)) === -1) {
-    throw new Error('У вас нет доступа к этому журналу');
-  }
+  return { ok: true, user: user, isAdmin: isAdminUser_(user) };
+}
 
-  return { ok: true, user: user };
+function getAdminTelegramIds_() {
+  return APP_CONFIG.ADMIN_TELEGRAM_IDS || APP_CONFIG.ALLOWED_TELEGRAM_IDS || [];
+}
+
+function isAdminUser_(user) {
+  if (!user || !user.id) return false;
+  return getAdminTelegramIds_().indexOf(String(user.id)) !== -1;
+}
+
+function assertAdmin_(user) {
+  if (!isAdminUser_(user)) {
+    throw new Error('Недостаточно прав. Изменять журнал могут только админы.');
+  }
 }
 
 function parseInitData_(initDataRaw) {
@@ -251,10 +268,14 @@ function buildInitPayload_(date, user, toastMessage) {
       id: user.id,
       first_name: user.first_name || '',
       last_name: user.last_name || '',
-      username: user.username || ''
+      username: user.username || '',
+      isAdmin: isAdminUser_(user),
+      role: isAdminUser_(user) ? 'admin' : 'viewer'
     },
+    canEdit: isAdminUser_(user),
     students: studentsWithStats,
     records: records,
+    dateHasRecords: records.length > 0,
     history: history,
     stats: stats,
     toast: toastMessage || ''
