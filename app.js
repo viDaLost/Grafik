@@ -1,908 +1,1400 @@
-const tg = window.Telegram && window.Telegram.WebApp ? window.Telegram.WebApp : null;
+(() => {
+  'use strict';
 
-const REASONS = [
-  'Болел(а)',
-  'Семейные обстоятельства',
-  'Уехал(а)',
-  'Школа / экзамен',
-  'Предупредил(а) заранее',
-  'Без причины',
-  'Другое'
-];
+  const tg = window.Telegram?.WebApp || null;
 
-const state = {
-  apiUrl: (window.APP_CONFIG && window.APP_CONFIG.API_URL) || '',
-  user: null,
-  date: '',
-  students: [],
-  records: new Map(),
-  history: [],
-  activeTab: 'attendance',
-  filter: 'all',
-  search: '',
-  dirty: false,
-  editingStudentId: null,
-  openedHistoryDate: null,
-  canEdit: false,
-  dateHasRecords: false,
-  lessonNote: ''
-};
+  const REASONS = Object.freeze([
+    'Болел(а)',
+    'Семейные обстоятельства',
+    'Уехал(а)',
+    'Школа / экзамен',
+    'Предупредил(а) заранее',
+    'Без причины',
+    'Другое'
+  ]);
 
-const els = {
-  lessonDate: document.getElementById('lessonDate'),
-  studentsList: document.getElementById('studentsList'),
-  studentsAdminList: document.getElementById('studentsAdminList'),
-  historyList: document.getElementById('historyList'),
-  statTotal: document.getElementById('statTotal'),
-  statPresent: document.getElementById('statPresent'),
-  statAbsent: document.getElementById('statAbsent'),
-  addStudentBtn: document.getElementById('addStudentBtn'),
-  newStudentName: document.getElementById('newStudentName'),
-  markAllPresentBtn: document.getElementById('markAllPresentBtn'),
-  clearHistoryBtn: document.getElementById('clearHistoryBtn'),
-  userBadge: document.getElementById('userBadge'),
-  accessNote: document.getElementById('accessNote'),
-  attendanceHelp: document.getElementById('attendanceHelp'),
-  lessonNoteInput: document.getElementById('lessonNoteInput'),
-  lessonNoteView: document.getElementById('lessonNoteView'),
-  studentsHelp: document.getElementById('studentsHelp'),
-  historyHelp: document.getElementById('historyHelp'),
-  loadingOverlay: document.getElementById('loadingOverlay'),
-  loadingText: document.getElementById('loadingText'),
-  toast: document.getElementById('toast'),
-  searchInput: document.getElementById('searchInput'),
-  filterRow: document.getElementById('filterRow'),
-  reasonModal: document.getElementById('reasonModal'),
-  modalStudentName: document.getElementById('modalStudentName'),
-  reasonSelect: document.getElementById('reasonSelect'),
-  reasonComment: document.getElementById('reasonComment'),
-  saveReasonBtn: document.getElementById('saveReasonBtn'),
-  markPresentFromModalBtn: document.getElementById('markPresentFromModalBtn'),
-  historyModal: document.getElementById('historyModal'),
-  historyModalTitle: document.getElementById('historyModalTitle'),
-  historyModalBody: document.getElementById('historyModalBody'),
-  addStudentControls: document.getElementById('addStudentControls')
-};
+  const REQUEST_TIMEOUT_MS = 30000;
+  const DEMO_STUDENTS = Object.freeze([
+    { studentId: 'demo-1', fullName: 'Анна Смирнова', sortOrder: 1, presentCount: 12, absentCount: 1 },
+    { studentId: 'demo-2', fullName: 'Михаил Орлов', sortOrder: 2, presentCount: 10, absentCount: 3 },
+    { studentId: 'demo-3', fullName: 'София Кузнецова', sortOrder: 3, presentCount: 13, absentCount: 0 },
+    { studentId: 'demo-4', fullName: 'Даниил Волков', sortOrder: 4, presentCount: 8, absentCount: 4 },
+    { studentId: 'demo-5', fullName: 'Мария Белова', sortOrder: 5, presentCount: 11, absentCount: 2 }
+  ]);
 
-function initTelegram() {
-  if (!tg) {
-    showToast('Приложение запущено вне Telegram. Доступен демо-режим.');
-    return;
-  }
-
-  tg.ready();
-  tg.expand();
-  
-  // Привязка цветов к системной теме Telegram
-  updateTelegramThemeColors();
-
-  const displayName = [
-    tg.initDataUnsafe?.user?.first_name,
-    tg.initDataUnsafe?.user?.last_name
-  ].filter(Boolean).join(' ') || tg.initDataUnsafe?.user?.username || 'Пользователь';
-
-  els.userBadge.textContent = displayName;
-  
-  // Инициализация обработчиков нативных кнопок Telegram
-  if (tg.MainButton) {
-    tg.MainButton.onClick(saveJournal);
-  }
-  if (tg.BackButton) {
-    tg.BackButton.onClick(handleNativeBackButtonClick);
-  }
-}
-
-function updateTelegramThemeColors() {
-  if (!tg) return;
-  const headerColor = tg.themeParams.header_bg_color || '#eff3ff';
-  const bgColor = tg.themeParams.bg_color || '#eff3ff';
-  tg.setHeaderColor(headerColor);
-  tg.setBackgroundColor(bgColor);
-}
-
-function handleNativeBackButtonClick() {
-  triggerHaptic('light');
-  if (state.editingStudentId) {
-    closeReasonModal();
-  } else if (state.openedHistoryDate) {
-    closeHistoryModal();
-  }
-}
-
-function triggerHaptic(style = 'light') {
-  if (!tg || !tg.HapticFeedback) return;
-  switch(style) {
-    case 'light': tg.HapticFeedback.impactOccurred('light'); break;
-    case 'medium': tg.HapticFeedback.impactOccurred('medium'); break;
-    case 'success': tg.HapticFeedback.notificationOccurred('success'); break;
-    case 'error': tg.HapticFeedback.notificationOccurred('error'); break;
-  }
-}
-
-function updateNativeMainButton() {
-  if (!tg || !tg.MainButton) return;
-
-  if (state.canEdit && state.dirty && state.activeTab === 'attendance') {
-    tg.MainButton.setText('Сохранить изменения');
-    tg.MainButton.show();
-    tg.MainButton.enable();
-  } else {
-    tg.MainButton.hide();
-  }
-}
-
-function setLoading(isLoading, text = 'Синхронизация…') {
-  els.loadingText.textContent = text;
-  els.loadingOverlay.classList.toggle('hidden', !isLoading);
-}
-
-function normalizeUiErrorMessage(message) {
-  const text = String(message || '').trim();
-  if (!text) return 'Непредвиденная ошибка';
-  if (text === 'Failed to fetch' || text === 'Load failed') return 'Отсутствует подключение к сети';
-  return text;
-}
-
-function showToast(message) {
-  if (!message) return;
-  els.toast.textContent = normalizeUiErrorMessage(message);
-  els.toast.classList.add('show');
-  clearTimeout(showToast.timer);
-  showToast.timer = setTimeout(() => {
-    els.toast.classList.remove('show');
-  }, 3000);
-}
-
-function todayLocalISO() {
-  const now = new Date();
-  const tzOffset = now.getTimezoneOffset() * 60000;
-  return new Date(now.getTime() - tzOffset).toISOString().slice(0, 10);
-}
-
-async function api(action, extra = {}, loadingText = 'Загрузка…') {
-  if (!state.apiUrl || state.apiUrl.includes('PASTE_YOUR_GOOGLE_APPS_SCRIPT_WEB_APP_URL_HERE')) {
-    throw new Error('Укажите корректный API URL в конфигурационном файле config.js');
-  }
-  if (!tg || !tg.initData) {
-    throw new Error('Авторизация не удалась. Откройте приложение внутри Telegram');
-  }
-
-  setLoading(true, loadingText);
-
-  const payload = {
-    action,
-    initData: tg.initData,
-    ...extra
+  const state = {
+    apiUrl: normalizeString(window.APP_CONFIG?.API_URL),
+    user: null,
+    date: '',
+    students: [],
+    records: new Map(),
+    history: [],
+    activeTab: 'attendance',
+    filter: 'all',
+    search: '',
+    dirty: false,
+    editingStudentId: null,
+    openedHistoryDate: null,
+    canEdit: false,
+    dateHasRecords: false,
+    lessonNote: '',
+    loadingDepth: 0,
+    demoMode: Boolean(window.APP_CONFIG?.DEMO_MODE) || !tg,
+    pendingConfirmResolve: null,
+    telegramMainButtonBound: false,
+    telegramBackButtonBound: false
   };
 
-  try {
-    const response = await fetch(state.apiUrl, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8'
-      },
-      body: new URLSearchParams({ payload: JSON.stringify(payload) }).toString()
-    });
+  const els = {
+    appShell: getRequiredElement('appShell'),
+    lessonDate: getRequiredElement('lessonDate'),
+    studentsList: getRequiredElement('studentsList'),
+    studentsAdminList: getRequiredElement('studentsAdminList'),
+    historyList: getRequiredElement('historyList'),
+    statTotal: getRequiredElement('statTotal'),
+    statPresent: getRequiredElement('statPresent'),
+    statAbsent: getRequiredElement('statAbsent'),
+    attendanceProgress: getRequiredElement('attendanceProgress'),
+    progressLabel: getRequiredElement('progressLabel'),
+    progressPercent: getRequiredElement('progressPercent'),
+    addStudentForm: getRequiredElement('addStudentForm'),
+    addStudentBtn: getRequiredElement('addStudentBtn'),
+    newStudentName: getRequiredElement('newStudentName'),
+    saveBtn: getRequiredElement('saveBtn'),
+    saveBannerBtn: getRequiredElement('saveBannerBtn'),
+    unsavedBanner: getRequiredElement('unsavedBanner'),
+    markAllPresentBtn: getRequiredElement('markAllPresentBtn'),
+    clearHistoryBtn: getRequiredElement('clearHistoryBtn'),
+    userBadge: getRequiredElement('userBadge'),
+    modeBadge: getRequiredElement('modeBadge'),
+    accessNote: getRequiredElement('accessNote'),
+    attendanceHelp: getRequiredElement('attendanceHelp'),
+    lessonNoteInput: getRequiredElement('lessonNoteInput'),
+    lessonNoteView: getRequiredElement('lessonNoteView'),
+    studentsHelp: getRequiredElement('studentsHelp'),
+    historyHelp: getRequiredElement('historyHelp'),
+    loadingOverlay: getRequiredElement('loadingOverlay'),
+    loadingText: getRequiredElement('loadingText'),
+    toast: getRequiredElement('toast'),
+    searchInput: getRequiredElement('searchInput'),
+    filterRow: getRequiredElement('filterRow'),
+    reasonModal: getRequiredElement('reasonModal'),
+    modalStudentName: getRequiredElement('modalStudentName'),
+    reasonSelect: getRequiredElement('reasonSelect'),
+    reasonComment: getRequiredElement('reasonComment'),
+    closeModalBtn: getRequiredElement('closeModalBtn'),
+    saveReasonBtn: getRequiredElement('saveReasonBtn'),
+    markPresentFromModalBtn: getRequiredElement('markPresentFromModalBtn'),
+    historyModal: getRequiredElement('historyModal'),
+    historyModalTitle: getRequiredElement('historyModalTitle'),
+    historyModalBody: getRequiredElement('historyModalBody'),
+    closeHistoryModalBtn: getRequiredElement('closeHistoryModalBtn'),
+    confirmModal: getRequiredElement('confirmModal'),
+    confirmTitle: getRequiredElement('confirmTitle'),
+    confirmText: getRequiredElement('confirmText'),
+    confirmCancelBtn: getRequiredElement('confirmCancelBtn'),
+    confirmAcceptBtn: getRequiredElement('confirmAcceptBtn')
+  };
 
-    const text = await response.text();
-    let data;
-    try {
-      data = JSON.parse(text);
-    } catch (error) {
-      throw new Error('Критический сбой: Сервер вернул некорректный формат данных');
+  function getRequiredElement(id) {
+    const element = document.getElementById(id);
+    if (!element) {
+      throw new Error(`Не найден элемент интерфейса: #${id}`);
     }
-
-    if (!data.ok) {
-      throw new Error(data.error || 'Ошибка выполнения серверного сценария');
-    }
-
-    return data;
-  } finally {
-    setLoading(false);
+    return element;
   }
-}
 
-function normalizeRecords(students, serverRecords, fillMissingRecords = true) {
-  const map = new Map();
+  function normalizeString(value) {
+    return String(value ?? '').trim();
+  }
 
-  (serverRecords || []).forEach((rec) => {
-    map.set(rec.studentId, {
-      studentId: rec.studentId,
-      studentName: rec.studentName,
-      status: rec.status === 'absent' ? 'absent' : 'present',
-      reason: rec.reason || '',
-      comment: rec.comment || ''
-    });
-  });
+  function normalizeStudentId(value) {
+    return normalizeString(value);
+  }
 
-  if (fillMissingRecords) {
-    students.forEach((student) => {
-      if (!map.has(student.studentId)) {
-        map.set(student.studentId, {
-          studentId: student.studentId,
-          studentName: student.fullName,
-          status: 'present',
-          reason: '',
-          comment: ''
-        });
+  function getTelegramUser() {
+    return tg?.initDataUnsafe?.user || null;
+  }
+
+  function getTelegramDisplayName(user = getTelegramUser()) {
+    if (!user) return 'Пользователь';
+    return [user.first_name, user.last_name].filter(Boolean).join(' ') || user.username || 'Пользователь';
+  }
+
+  function getLocalAdminTelegramIds() {
+    const ids = Array.isArray(window.APP_CONFIG?.ADMIN_TELEGRAM_IDS)
+      ? window.APP_CONFIG.ADMIN_TELEGRAM_IDS
+      : [];
+
+    return ids
+      .map((item) => normalizeString(item))
+      .filter(Boolean);
+  }
+
+  function isLocalAdminUser(user) {
+    if (!user?.id) return false;
+    return getLocalAdminTelegramIds().includes(normalizeString(user.id));
+  }
+
+  function initTelegram() {
+    if (!tg) {
+      document.body.classList.add('demo-mode');
+      els.userBadge.textContent = 'Демо-просмотр';
+      els.modeBadge.textContent = 'Вне Telegram';
+      els.modeBadge.className = 'mode-chip demo';
+      return;
+    }
+
+    tg.ready();
+    tg.expand();
+
+    try {
+      tg.enableClosingConfirmation?.();
+      tg.setHeaderColor?.('#101828');
+      tg.setBackgroundColor?.('#f4f7fb');
+    } catch (error) {
+      console.warn('Telegram chrome setup skipped:', error);
+    }
+
+    els.userBadge.textContent = getTelegramDisplayName();
+    setupTelegramMainButton();
+    setupTelegramBackButton();
+  }
+
+  function setupTelegramMainButton() {
+    if (!tg?.MainButton || state.telegramMainButtonBound) return;
+    tg.MainButton.onClick(() => {
+      if (state.canEdit && state.dirty) {
+        saveJournal();
       }
     });
+    state.telegramMainButtonBound = true;
   }
 
-  return map;
-}
-
-function getLocalAdminTelegramIds() {
-  const ids = window.APP_CONFIG && Array.isArray(window.APP_CONFIG.ADMIN_TELEGRAM_IDS)
-    ? window.APP_CONFIG.ADMIN_TELEGRAM_IDS
-    : [];
-  return ids.map((item) => String(item || '').trim()).filter(Boolean);
-}
-
-function isLocalAdminUser(user) {
-  if (!user || !user.id) return false;
-  return getLocalAdminTelegramIds().includes(String(user.id).trim());
-}
-
-function applyPayload(payload) {
-  state.user = payload.user || null;
-  state.date = payload.date;
-  state.students = payload.students || [];
-  state.history = payload.history || [];
-  
-  const serverSaysCanEdit = Boolean(payload.canEdit || payload.user?.isAdmin);
-  const localFallbackCanEdit = isLocalAdminUser(payload.user || null);
-  state.canEdit = serverSaysCanEdit || localFallbackCanEdit;
-  
-  state.dateHasRecords = Boolean(payload.dateHasRecords || (payload.records || []).length);
-  state.lessonNote = String(payload.lessonNote || '');
-  state.records = normalizeRecords(state.students, payload.records || [], state.canEdit);
-  state.dirty = false;
-  
-  els.lessonDate.value = state.date;
-  renderAll();
-  
-  if (payload.toast) {
-    showToast(payload.toast);
-  }
-}
-
-function renderAll() {
-  renderAccessMode();
-  renderLessonNote();
-  renderStats();
-  renderTabs();
-  renderAttendance();
-  renderStudentsAdmin();
-  renderHistory();
-  updateNativeMainButton();
-}
-
-function getCurrentUserDisplayName() {
-  if (!state.user) return 'Пользователь';
-  return [state.user.first_name, state.user.last_name].filter(Boolean).join(' ')
-    || state.user.username
-    || 'Пользователь';
-}
-
-function renderAccessMode() {
-  const isAdmin = state.canEdit;
-  document.body.classList.toggle('read-only-mode', !isAdmin);
-
-  if (els.userBadge) {
-    els.userBadge.textContent = (isAdmin ? 'Админ: ' : 'Просмотр: ') + getCurrentUserDisplayName();
-  }
-  if (els.accessNote) {
-    els.accessNote.textContent = isAdmin
-      ? 'Режим редактирования: вам доступны любые изменения данных.'
-      : 'Режим просмотра: изменения заблокированы администратором.';
-  }
-  if (els.attendanceHelp) {
-    els.attendanceHelp.textContent = isAdmin
-      ? 'Управляйте статусами посещения. Изменения сохраняются нативной кнопкой внизу.'
-      : 'Архивная выписка посещаемости за выбранную календарную дату.';
-  }
-  if (els.studentsHelp) {
-    els.studentsHelp.textContent = isAdmin
-      ? 'Добавляйте новые профили или производите безвозвратное удаление участников.'
-      : 'Актуальный список зарегистрированных участников учебного процесса.';
-  }
-  if (els.historyHelp) {
-    els.historyHelp.textContent = isAdmin
-      ? 'История сохранений. Доступен детальный просмотр и удаление контрольных точек.'
-      : 'Просмотр логов посещаемости по дням.';
+  function setupTelegramBackButton() {
+    if (!tg?.BackButton || state.telegramBackButtonBound) return;
+    tg.BackButton.onClick(() => {
+      if (!els.reasonModal.classList.contains('hidden')) {
+        closeReasonModal();
+        return;
+      }
+      if (!els.historyModal.classList.contains('hidden')) {
+        closeHistoryModal();
+        return;
+      }
+      if (!els.confirmModal.classList.contains('hidden')) {
+        resolveConfirm(false);
+        return;
+      }
+      if (state.activeTab !== 'attendance') {
+        setActiveTab('attendance');
+      }
+    });
+    state.telegramBackButtonBound = true;
   }
 
-  // Скрытие управляющих элементов при отсутствии прав
-  els.markAllPresentBtn.classList.toggle('hidden', !isAdmin);
-  els.clearHistoryBtn.classList.toggle('hidden', !isAdmin);
-  if (els.addStudentControls) {
-    els.addStudentControls.classList.toggle('hidden', !isAdmin);
+  function updateTelegramChrome() {
+    if (!tg) return;
+
+    const modalIsOpen = !els.reasonModal.classList.contains('hidden')
+      || !els.historyModal.classList.contains('hidden')
+      || !els.confirmModal.classList.contains('hidden');
+    const shouldShowBack = modalIsOpen || state.activeTab !== 'attendance';
+
+    try {
+      if (tg.BackButton) {
+        shouldShowBack ? tg.BackButton.show() : tg.BackButton.hide();
+      }
+
+      if (tg.MainButton) {
+        if (state.canEdit && state.dirty) {
+          tg.MainButton.setText('Сохранить журнал');
+          tg.MainButton.show();
+        } else {
+          tg.MainButton.hide();
+        }
+      }
+    } catch (error) {
+      console.warn('Telegram chrome update skipped:', error);
+    }
   }
-}
 
-function ensureCanEdit() {
-  if (state.canEdit) return true;
-  triggerHaptic('error');
-  showToast('Действие запрещено. У вас активирован режим просмотра.');
-  return false;
-}
-
-function renderLessonNote() {
-  if (!els.lessonNoteInput || !els.lessonNoteView) return;
-
-  const noteText = String(state.lessonNote || '').trim();
-  els.lessonNoteInput.value = noteText;
-
-  els.lessonNoteInput.classList.toggle('hidden', !state.canEdit);
-  els.lessonNoteView.classList.toggle('hidden', state.canEdit);
-
-  if (!state.canEdit) {
-    els.lessonNoteView.textContent = noteText
-      ? noteText
-      : (state.dateHasRecords ? 'Комментарий к занятию отсутствует.' : 'Журнал на выбранную дату ещё не сформирован.');
+  function setLoading(isLoading, text = 'Загрузка…') {
+    state.loadingDepth += isLoading ? 1 : -1;
+    state.loadingDepth = Math.max(0, state.loadingDepth);
+    els.loadingText.textContent = text;
+    els.loadingOverlay.classList.toggle('hidden', state.loadingDepth === 0);
   }
-}
 
-function renderStats() {
-  const values = Array.from(state.records.values());
+  function normalizeUiErrorMessage(message) {
+    const text = normalizeString(message);
+    if (!text) return 'Произошла ошибка';
+    if (text === 'Failed to fetch' || text === 'Load failed' || text.includes('NetworkError')) {
+      return 'Ошибка сети или ответа сервера';
+    }
+    if (text.includes('Unexpected token')) return 'Сервер вернул некорректный ответ';
+    return text;
+  }
 
-  if (!state.canEdit) {
+  function showToast(message) {
+    const text = normalizeUiErrorMessage(message);
+    if (!text) return;
+
+    els.toast.textContent = text;
+    els.toast.classList.add('show');
+    clearTimeout(showToast.timer);
+    showToast.timer = setTimeout(() => {
+      els.toast.classList.remove('show');
+    }, 3000);
+  }
+
+  function haptic(type = 'impact') {
+    if (!tg?.HapticFeedback) return;
+    try {
+      if (type === 'success' || type === 'error' || type === 'warning') {
+        tg.HapticFeedback.notificationOccurred(type);
+      } else {
+        tg.HapticFeedback.impactOccurred('light');
+      }
+    } catch (error) {
+      console.warn('Haptic feedback skipped:', error);
+    }
+  }
+
+  function todayLocalISO() {
+    const now = new Date();
+    const tzOffset = now.getTimezoneOffset() * 60000;
+    return new Date(now.getTime() - tzOffset).toISOString().slice(0, 10);
+  }
+
+  function assertApiIsConfigured() {
+    const placeholder = 'PASTE_YOUR_GOOGLE_APPS_SCRIPT_WEB_APP_URL_HERE';
+    if (!state.apiUrl || state.apiUrl.includes(placeholder)) {
+      throw new Error('Укажите URL задеплоенного Apps Script в frontend/config.js');
+    }
+    if (!tg?.initData) {
+      throw new Error('Для реальной работы откройте приложение внутри Telegram');
+    }
+  }
+
+  async function api(action, extra = {}, loadingText = 'Загрузка…') {
+    if (state.demoMode) {
+      return demoApi(action, extra, loadingText);
+    }
+
+    assertApiIsConfigured();
+    setLoading(true, loadingText);
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+
+    const payload = {
+      action,
+      initData: tg.initData,
+      ...extra
+    };
+
+    try {
+      const response = await fetch(state.apiUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8'
+        },
+        body: new URLSearchParams({ payload: JSON.stringify(payload) }).toString(),
+        signal: controller.signal
+      });
+
+      const text = await response.text();
+      let data;
+      try {
+        data = JSON.parse(text);
+      } catch (error) {
+        console.error('Bad server response:', text);
+        throw new Error('Сервер вернул некорректный ответ');
+      }
+
+      if (!response.ok) {
+        throw new Error(data.error || `Ошибка сервера: ${response.status}`);
+      }
+
+      if (!data.ok) {
+        throw new Error(data.error || 'Не удалось выполнить запрос');
+      }
+
+      return data;
+    } catch (error) {
+      if (error.name === 'AbortError') {
+        throw new Error('Сервер не ответил вовремя. Проверьте Apps Script и интернет.');
+      }
+      throw error;
+    } finally {
+      clearTimeout(timeout);
+      setLoading(false);
+    }
+  }
+
+  async function demoApi(action, extra = {}, loadingText = 'Загрузка демо…') {
+    setLoading(true, loadingText);
+    await wait(220);
+
+    try {
+      if (!window.__ATTENDANCE_DEMO_DB__) {
+        const today = todayLocalISO();
+        window.__ATTENDANCE_DEMO_DB__ = {
+          students: structuredCloneSafe(DEMO_STUDENTS),
+          days: {
+            [today]: {
+              lessonNote: 'Демо-режим: данные не отправляются на сервер.',
+              records: [
+                { studentId: 'demo-1', studentName: 'Анна Смирнова', status: 'present', reason: '', comment: '' },
+                { studentId: 'demo-2', studentName: 'Михаил Орлов', status: 'absent', reason: 'Болел(а)', comment: 'Предупредили заранее' },
+                { studentId: 'demo-3', studentName: 'София Кузнецова', status: 'present', reason: '', comment: '' },
+                { studentId: 'demo-4', studentName: 'Даниил Волков', status: 'absent', reason: 'Школа / экзамен', comment: '' },
+                { studentId: 'demo-5', studentName: 'Мария Белова', status: 'present', reason: '', comment: '' }
+              ]
+            }
+          }
+        };
+      }
+
+      const db = window.__ATTENDANCE_DEMO_DB__;
+      const selectedDate = normalizeString(extra.date || state.date || todayLocalISO());
+
+      if (action === 'saveAttendance') {
+        db.days[selectedDate] = {
+          lessonNote: normalizeString(extra.lessonNote),
+          records: structuredCloneSafe(extra.records || [])
+        };
+        updateDemoCounters(db);
+        return buildDemoPayload(selectedDate, 'Демо-журнал сохранён локально');
+      }
+
+      if (action === 'addStudent') {
+        const fullName = normalizeString(extra.name);
+        if (!fullName) throw new Error('Введите имя нового ученика');
+        const student = {
+          studentId: `demo-${Date.now()}`,
+          fullName,
+          sortOrder: db.students.length + 1,
+          presentCount: 0,
+          absentCount: 0
+        };
+        db.students.push(student);
+        return buildDemoPayload(selectedDate, 'Ученик добавлен в демо-список');
+      }
+
+      if (action === 'deleteStudent') {
+        const id = normalizeStudentId(extra.studentId);
+        db.students = db.students.filter((student) => normalizeStudentId(student.studentId) !== id);
+        Object.values(db.days).forEach((day) => {
+          day.records = (day.records || []).filter((record) => normalizeStudentId(record.studentId) !== id);
+        });
+        updateDemoCounters(db);
+        return buildDemoPayload(selectedDate, 'Ученик удалён из демо-списка');
+      }
+
+      if (action === 'deleteHistoryDate') {
+        delete db.days[normalizeString(extra.dateToDelete)];
+        updateDemoCounters(db);
+        return buildDemoPayload(selectedDate, 'Дата удалена из демо-истории');
+      }
+
+      if (action === 'clearHistory') {
+        db.days = {};
+        updateDemoCounters(db);
+        return buildDemoPayload(selectedDate, 'Демо-история очищена');
+      }
+
+      return buildDemoPayload(selectedDate);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  function wait(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  function structuredCloneSafe(value) {
+    if (typeof structuredClone === 'function') {
+      return structuredClone(value);
+    }
+    return JSON.parse(JSON.stringify(value));
+  }
+
+  function updateDemoCounters(db) {
+    const counterMap = new Map();
+    db.students.forEach((student) => {
+      counterMap.set(normalizeStudentId(student.studentId), { present: 0, absent: 0 });
+    });
+
+    Object.values(db.days).forEach((day) => {
+      (day.records || []).forEach((record) => {
+        const id = normalizeStudentId(record.studentId);
+        if (!counterMap.has(id)) return;
+        const counters = counterMap.get(id);
+        if (record.status === 'absent') counters.absent += 1;
+        else counters.present += 1;
+      });
+    });
+
+    db.students = db.students.map((student) => {
+      const counters = counterMap.get(normalizeStudentId(student.studentId)) || { present: 0, absent: 0 };
+      return {
+        ...student,
+        presentCount: counters.present,
+        absentCount: counters.absent
+      };
+    });
+  }
+
+  function buildDemoPayload(selectedDate, toast = '') {
+    const db = window.__ATTENDANCE_DEMO_DB__;
+    const day = db.days[selectedDate] || { lessonNote: '', records: [] };
+    const history = Object.entries(db.days)
+      .sort(([a], [b]) => b.localeCompare(a))
+      .map(([date, value]) => buildHistoryEntry(date, value));
+
+    return {
+      ok: true,
+      user: {
+        id: 'demo-user',
+        first_name: 'Демо',
+        last_name: 'Пользователь',
+        username: 'demo',
+        isAdmin: true
+      },
+      canEdit: true,
+      date: selectedDate,
+      students: structuredCloneSafe(db.students),
+      records: structuredCloneSafe(day.records || []),
+      lessonNote: day.lessonNote || '',
+      dateHasRecords: Boolean((day.records || []).length),
+      history,
+      toast
+    };
+  }
+
+  function buildHistoryEntry(date, day) {
+    const records = day.records || [];
+    const presentList = records.filter((record) => record.status !== 'absent');
+    const absentList = records.filter((record) => record.status === 'absent');
+    return {
+      date,
+      total: records.length,
+      present: presentList.length,
+      absent: absentList.length,
+      presentList,
+      absentList,
+      lessonNote: day.lessonNote || ''
+    };
+  }
+
+  function normalizeStudents(students) {
+    return (Array.isArray(students) ? students : [])
+      .map((student, index) => ({
+        ...student,
+        studentId: normalizeStudentId(student.studentId ?? student.id ?? index),
+        fullName: normalizeString(student.fullName ?? student.name ?? student.studentName),
+        sortOrder: Number.isFinite(Number(student.sortOrder)) ? Number(student.sortOrder) : index + 1,
+        presentCount: Number(student.presentCount || 0),
+        absentCount: Number(student.absentCount || 0)
+      }))
+      .filter((student) => student.studentId && student.fullName);
+  }
+
+  function normalizeHistory(history) {
+    return (Array.isArray(history) ? history : [])
+      .map((row) => ({
+        ...row,
+        date: normalizeString(row.date),
+        total: Number(row.total || 0),
+        present: Number(row.present || 0),
+        absent: Number(row.absent || 0),
+        lessonNote: normalizeString(row.lessonNote),
+        presentList: Array.isArray(row.presentList) ? row.presentList : [],
+        absentList: Array.isArray(row.absentList) ? row.absentList : []
+      }))
+      .filter((row) => row.date)
+      .sort((a, b) => b.date.localeCompare(a.date));
+  }
+
+  function normalizeRecords(students, serverRecords, fillMissingRecords = true) {
+    const map = new Map();
+
+    (Array.isArray(serverRecords) ? serverRecords : []).forEach((rec) => {
+      const studentId = normalizeStudentId(rec.studentId ?? rec.id);
+      if (!studentId) return;
+
+      map.set(studentId, {
+        studentId,
+        studentName: normalizeString(rec.studentName ?? rec.fullName),
+        status: rec.status === 'absent' ? 'absent' : 'present',
+        reason: normalizeString(rec.reason),
+        comment: normalizeString(rec.comment)
+      });
+    });
+
+    if (fillMissingRecords) {
+      students.forEach((student) => {
+        const studentId = normalizeStudentId(student.studentId);
+        if (!map.has(studentId)) {
+          map.set(studentId, {
+            studentId,
+            studentName: student.fullName,
+            status: 'present',
+            reason: '',
+            comment: ''
+          });
+        }
+      });
+    }
+
+    return map;
+  }
+
+  function applyPayload(payload) {
+    const normalizedStudents = normalizeStudents(payload.students);
+    const serverSaysCanEdit = Boolean(payload.canEdit || payload.user?.isAdmin);
+    const localFallbackCanEdit = isLocalAdminUser(payload.user || getTelegramUser());
+
+    state.user = payload.user || getTelegramUser() || null;
+    state.date = normalizeString(payload.date || state.date || todayLocalISO());
+    state.students = normalizedStudents;
+    state.history = normalizeHistory(payload.history);
+    state.canEdit = Boolean(serverSaysCanEdit || localFallbackCanEdit || state.demoMode);
+    state.dateHasRecords = Boolean(payload.dateHasRecords || (payload.records || []).length);
+    state.lessonNote = normalizeString(payload.lessonNote);
+    state.records = normalizeRecords(state.students, payload.records || [], state.canEdit);
+    state.dirty = false;
+
+    els.lessonDate.value = state.date;
+    renderAll();
+
+    if (payload.toast) showToast(payload.toast);
+  }
+
+  function renderAll() {
+    renderAccessMode();
+    renderLessonNote();
+    renderStats();
+    renderTabs();
+    renderAttendance();
+    renderStudentsAdmin();
+    renderHistory();
+    renderDirtyState();
+    updateTelegramChrome();
+  }
+
+  function renderAccessMode() {
+    document.body.classList.toggle('read-only-mode', !state.canEdit);
+    document.body.classList.toggle('demo-mode', state.demoMode);
+
+    const displayName = state.demoMode ? 'Демо-просмотр' : getTelegramDisplayName(state.user);
+    els.userBadge.textContent = displayName;
+
+    els.modeBadge.className = 'mode-chip';
+    if (state.demoMode) {
+      els.modeBadge.classList.add('demo');
+      els.modeBadge.textContent = 'Демо';
+    } else if (state.canEdit) {
+      els.modeBadge.classList.add('admin');
+      els.modeBadge.textContent = 'Админ';
+    } else {
+      els.modeBadge.classList.add('readonly');
+      els.modeBadge.textContent = 'Просмотр';
+    }
+
+    if (state.demoMode) {
+      els.accessNote.textContent = 'Демо-режим для проверки дизайна вне Telegram. Реальные данные не отправляются на сервер.';
+    } else if (state.canEdit) {
+      els.accessNote.textContent = 'Режим администратора: можно менять отметки, список учеников и историю сохранений.';
+    } else {
+      els.accessNote.textContent = 'Режим просмотра: можно смотреть текущий журнал и историю, но изменения доступны только администраторам.';
+    }
+
+    els.attendanceHelp.textContent = state.canEdit
+      ? 'Выберите дату, отметьте отсутствующих и сохраните журнал. Несохранённые изменения подсвечиваются автоматически.'
+      : 'Здесь видно, кто был на занятии за выбранную дату и кто отсутствовал.';
+
+    els.studentsHelp.textContent = state.canEdit
+      ? 'Добавляйте или удаляйте учеников. Счётчики показывают накопленные посещения и пропуски.'
+      : 'Здесь открыт список учеников и их накопительная статистика.';
+
+    els.historyHelp.textContent = state.canEdit
+      ? 'Откройте точный список, удалите отдельную дату или очистите всю историю при необходимости.'
+      : 'Откройте точный список, чтобы посмотреть посещение поимённо.';
+
+    setElementHidden(els.markAllPresentBtn, !state.canEdit);
+    setElementHidden(els.saveBtn, !state.canEdit);
+    setElementHidden(els.saveBannerBtn, !state.canEdit);
+    setElementHidden(els.addStudentForm, !state.canEdit);
+    setElementHidden(els.clearHistoryBtn, !state.canEdit);
+  }
+
+  function setElementHidden(element, isHidden) {
+    element.hidden = Boolean(isHidden);
+  }
+
+  function ensureCanEdit() {
+    if (state.canEdit) return true;
+    showToast('Сейчас открыт режим просмотра. Изменения доступны только администраторам.');
+    haptic('warning');
+    return false;
+  }
+
+  function renderLessonNote() {
+    const noteText = normalizeString(state.lessonNote);
+
+    if (document.activeElement !== els.lessonNoteInput) {
+      els.lessonNoteInput.value = state.lessonNote || '';
+    }
+
+    setElementHidden(els.lessonNoteInput, !state.canEdit);
+    setElementHidden(els.lessonNoteView, state.canEdit);
+
+    if (!state.canEdit) {
+      els.lessonNoteView.textContent = noteText
+        ? noteText
+        : (state.dateHasRecords ? 'Комментарий к занятию не указан.' : 'За эту дату журнал ещё не сохранён.');
+    }
+  }
+
+  function getStats() {
+    const values = Array.from(state.records.values());
     const absent = values.filter((item) => item.status === 'absent').length;
-    const present = values.filter((item) => item.status !== 'absent').length;
-    els.statTotal.textContent = String(values.length);
-    els.statPresent.textContent = String(present);
-    els.statAbsent.textContent = String(absent);
-    return;
+    const total = state.canEdit ? state.students.length : values.length;
+    const present = Math.max(0, total - absent);
+    const percent = total > 0 ? Math.round((present / total) * 100) : 0;
+    return { total, present, absent, percent };
   }
 
-  const absent = values.filter((item) => item.status === 'absent').length;
-  const total = state.students.length;
-  const present = total - absent;
-
-  els.statTotal.textContent = String(total);
-  els.statPresent.textContent = String(Math.max(0, present));
-  els.statAbsent.textContent = String(absent);
-}
-
-function getOrderedStudents() {
-  const searchValue = state.search.trim().toLowerCase();
-  const sourceStudents = state.canEdit
-    ? state.students.slice()
-    : state.students.filter((student) => state.records.has(student.studentId));
-    
-  const students = sourceStudents.sort((a, b) => {
-    const aAbsent = state.records.get(a.studentId)?.status === 'absent' ? 1 : 0;
-    const bAbsent = state.records.get(b.studentId)?.status === 'absent' ? 1 : 0;
-    if (aAbsent !== bAbsent) return bAbsent - aAbsent;
-    return (a.sortOrder || 0) - (b.sortOrder || 0);
-  });
-
-  return students.filter((student) => {
-    const record = state.records.get(student.studentId);
-    const matchesSearch = !searchValue || student.fullName.toLowerCase().includes(searchValue);
-    const matchesFilter = state.filter === 'all'
-      || (state.filter === 'absent' && record?.status === 'absent')
-      || (state.filter === 'present' && record?.status !== 'absent');
-    return matchesSearch && matchesFilter;
-  });
-}
-
-function renderAttendance() {
-  const students = getOrderedStudents();
-
-  if (!students.length) {
-    const message = !state.canEdit && !state.dateHasRecords
-      ? 'За эту дату журнал ещё не сохранён.'
-      : (state.students.length ? 'По вашему фильтру никто не найден.' : 'Список учеников пуст.');
-    els.studentsList.innerHTML = `<div class="empty-state-card">${message}</div>`;
-    return;
+  function renderStats() {
+    const stats = getStats();
+    els.statTotal.textContent = String(stats.total);
+    els.statPresent.textContent = String(stats.present);
+    els.statAbsent.textContent = String(stats.absent);
+    els.attendanceProgress.style.width = `${stats.percent}%`;
+    els.progressPercent.textContent = `${stats.percent}%`;
+    els.progressLabel.textContent = stats.total
+      ? `Присутствуют ${stats.present} из ${stats.total}`
+      : 'Посещение не рассчитано';
   }
 
-  els.studentsList.innerHTML = students.map((student) => {
-    const record = state.records.get(student.studentId) || {
+  function renderDirtyState() {
+    const showBanner = state.canEdit && state.dirty;
+    els.unsavedBanner.classList.toggle('hidden', !showBanner);
+    els.saveBtn.textContent = state.dirty ? 'Сохранить изменения' : 'Сохранить';
+    updateTelegramChrome();
+  }
+
+  function getOrderedStudents() {
+    const searchValue = state.search.trim().toLocaleLowerCase('ru-RU');
+    const sourceStudents = state.canEdit
+      ? state.students.slice()
+      : state.students.filter((student) => state.records.has(normalizeStudentId(student.studentId)));
+
+    return sourceStudents
+      .sort((a, b) => {
+        const aRecord = state.records.get(normalizeStudentId(a.studentId));
+        const bRecord = state.records.get(normalizeStudentId(b.studentId));
+        const aAbsent = aRecord?.status === 'absent' ? 1 : 0;
+        const bAbsent = bRecord?.status === 'absent' ? 1 : 0;
+        if (aAbsent !== bAbsent) return bAbsent - aAbsent;
+        const bySort = Number(a.sortOrder || 0) - Number(b.sortOrder || 0);
+        if (bySort !== 0) return bySort;
+        return a.fullName.localeCompare(b.fullName, 'ru');
+      })
+      .filter((student) => {
+        const record = state.records.get(normalizeStudentId(student.studentId));
+        const name = student.fullName.toLocaleLowerCase('ru-RU');
+        const matchesSearch = !searchValue || name.includes(searchValue);
+        const matchesFilter = state.filter === 'all'
+          || (state.filter === 'absent' && record?.status === 'absent')
+          || (state.filter === 'present' && record?.status !== 'absent');
+        return matchesSearch && matchesFilter;
+      });
+  }
+
+  function renderAttendance() {
+    const students = getOrderedStudents();
+
+    if (!students.length) {
+      const message = !state.canEdit && !state.dateHasRecords
+        ? 'За эту дату журнал ещё не сохранён.'
+        : (state.students.length ? 'По этому поиску или фильтру никого нет.' : 'Список учеников пуст.');
+      els.studentsList.innerHTML = renderEmptyState('Посещение', message);
+      return;
+    }
+
+    els.studentsList.innerHTML = students.map((student) => renderAttendanceRow(student)).join('');
+  }
+
+  function renderAttendanceRow(student) {
+    const studentId = normalizeStudentId(student.studentId);
+    const record = state.records.get(studentId) || {
+      studentId,
       status: 'present',
       reason: '',
       comment: ''
     };
 
     const isAbsent = record.status === 'absent';
-    const initials = student.fullName.trim().charAt(0).toUpperCase();
-    const counters = `Присутствие: ${student.presentCount || 0} · Пропуски: ${student.absentCount || 0}`;
-    
-    let actionMarkup = '';
-    if (state.canEdit) {
-      actionMarkup = `
-        <div class="card-action-row">
-          <button class="tma-toggle-btn btn-state-present ${!isAbsent ? 'selected' : ''}" data-student-id="${student.studentId}" data-status="present">Был(а)</button>
-          <button class="tma-toggle-btn btn-state-absent ${isAbsent ? 'selected' : ''}" data-student-id="${student.studentId}" data-status="absent">Н/Я</button>
-        </div>
-      `;
-    } else {
-      actionMarkup = `
-        <div class="badge-status-static ${isAbsent ? 'type-absent' : 'type-present'}">
-          ${isAbsent ? 'Отсутствовал(а)' : 'Присутствовал(а)'}
-        </div>
-      `;
-    }
+    const subtitle = isAbsent ? 'Отсутствует' : 'Присутствует';
+    const initials = getInitials(student.fullName);
+    const counters = `Был(а): ${student.presentCount || 0} · Не был(а): ${student.absentCount || 0}`;
+    const safeId = escapeHtml(studentId);
+
+    const actions = state.canEdit ? `
+      <div class="status-group" role="group" aria-label="Статус ${escapeHtml(student.fullName)}">
+        <button class="status-btn ${!isAbsent ? 'active-present' : ''}" data-student-id="${safeId}" data-status="present" type="button">Был(а)</button>
+        <button class="status-btn ${isAbsent ? 'active-absent' : ''}" data-student-id="${safeId}" data-status="absent" type="button">Не был(а)</button>
+      </div>
+      ${isAbsent ? `<button class="reason-btn" data-edit-reason="${safeId}" type="button">Причина</button>` : ''}
+    ` : `
+      <div class="view-status-pill ${isAbsent ? 'absent' : 'present'}">${isAbsent ? 'Не был(а)' : 'Был(а)'}</div>
+    `;
 
     return `
-      <article class="student-profile-card ${isAbsent ? 'status-absent-mode' : ''}" data-student-id="${student.studentId}">
-        <div class="card-main-content">
-          <div class="avatar-circle">${escapeHtml(initials)}</div>
-          <div class="profile-details">
-            <h4 class="profile-name">${escapeHtml(student.fullName)}</h4>
-            <div class="profile-statistics-line">${escapeHtml(counters)}</div>
-            ${isAbsent ? `
-              <div class="reason-container-sub" data-edit-reason="${student.studentId}">
-                <span class="reason-tag">${escapeHtml(record.reason || 'Причина отсутствует')}</span>
-                ${record.comment ? `<p class="comment-subtext">«${escapeHtml(record.comment)}»</p>` : ''}
-                ${state.canEdit ? '<span class="edit-reason-trigger-text">Изменить причину</span>' : ''}
-              </div>
-            ` : ''}
+      <article class="attendance-row ${isAbsent ? 'absent' : ''}" data-student-id="${safeId}">
+        <div class="student-main">
+          <div class="student-topline">
+            <div class="avatar ${isAbsent ? 'absent' : ''}" aria-hidden="true">${escapeHtml(initials)}</div>
+            <div class="name-stack">
+              <div class="student-name">${escapeHtml(student.fullName)}</div>
+              <div class="student-subtitle">${escapeHtml(subtitle)}</div>
+              <div class="student-counter-line">${escapeHtml(counters)}</div>
+            </div>
           </div>
+          ${isAbsent ? renderReasonLine(record) : ''}
         </div>
-        <div class="card-control-wrapper">
-          ${actionMarkup}
-        </div>
+        <div class="row-actions ${state.canEdit ? '' : 'view-only'}">${actions}</div>
       </article>
     `;
-  }).join('');
-}
-
-function renderStudentsAdmin() {
-  if (!state.students.length) {
-    els.studentsAdminList.innerHTML = '<div class="empty-state-card">Список учащихся пуст.</div>';
-    return;
   }
 
-  els.studentsAdminList.innerHTML = state.students.map((student, index) => `
-    <div class="list-row-item">
-      <div class="item-info">
-        <span class="item-index">${index + 1}.</span>
-        <strong class="item-title">${escapeHtml(student.fullName)}</strong>
-        <div class="counters-row">
-          <span class="micro-badge color-success">Посетил(а): ${student.presentCount || 0}</span>
-          <span class="micro-badge color-danger">Пропустил(а): ${student.absentCount || 0}</span>
+  function renderReasonLine(record) {
+    return `
+      <div class="reason-line">
+        <span class="reason-badge">${escapeHtml(record.reason || 'Причина не указана')}</span>
+        ${record.comment ? `<span class="comment-text">${escapeHtml(record.comment)}</span>` : ''}
+      </div>
+    `;
+  }
+
+  function renderStudentsAdmin() {
+    if (!state.students.length) {
+      els.studentsAdminList.innerHTML = renderEmptyState('Ученики', 'Пока нет учеников. Администратор может добавить первого ученика.');
+      return;
+    }
+
+    els.studentsAdminList.innerHTML = state.students
+      .slice()
+      .sort((a, b) => Number(a.sortOrder || 0) - Number(b.sortOrder || 0) || a.fullName.localeCompare(b.fullName, 'ru'))
+      .map((student, index) => {
+        const studentId = normalizeStudentId(student.studentId);
+        return `
+          <article class="admin-row">
+            <div>
+              <strong>${index + 1}. ${escapeHtml(student.fullName)}</strong>
+              <div class="admin-counters">
+                <span class="metric-pill success">Был(а): ${student.presentCount || 0}</span>
+                <span class="metric-pill danger">Не был(а): ${student.absentCount || 0}</span>
+              </div>
+            </div>
+            ${state.canEdit ? `<button class="danger-btn" data-delete-student="${escapeHtml(studentId)}" type="button">Удалить</button>` : ''}
+          </article>
+        `;
+      }).join('');
+  }
+
+  function renderHistory() {
+    if (!state.history.length) {
+      els.historyList.innerHTML = renderEmptyState('История', 'История пока пуста. Сохраните хотя бы одну дату.');
+      return;
+    }
+
+    els.historyList.innerHTML = state.history.map((row) => `
+      <article class="history-row ${row.absent ? 'has-absent' : ''}">
+        <div>
+          <strong>${escapeHtml(formatDateRu(row.date))}</strong>
+          <span>Всего отмечено: ${row.total}</span>
+          <div class="history-metrics">
+            <span class="metric-pill success">Были: ${row.present}</span>
+            <span class="metric-pill danger">Не были: ${row.absent}</span>
+          </div>
+          ${row.lessonNote ? `<div class="history-note-line">${escapeHtml(row.lessonNote)}</div>` : ''}
         </div>
-      </div>
-      ${state.canEdit ? `<button class="btn-action-destructive" data-delete-student="${student.studentId}">Удалить</button>` : ''}
-    </div>
-  `).join('');
-}
-
-function renderHistory() {
-  if (!state.history.length) {
-    els.historyList.innerHTML = '<div class="empty-state-card">Архив пуст. Сохраните журнал, чтобы создать запись.</div>';
-    return;
-  }
-
-  els.historyList.innerHTML = state.history.map((row) => `
-    <div class="list-row-item item-vertical-align">
-      <div class="item-info">
-        <strong class="item-title-large">${formatDateRu(row.date)}</strong>
-        <div class="counters-row margin-tight">
-          <span class="micro-badge">Всего: ${row.total}</span>
-          <span class="micro-badge color-success">Были: ${row.present}</span>
-          <span class="micro-badge color-danger">Н/Я: ${row.absent}</span>
+        <div class="history-actions-col">
+          <button class="outline-btn" data-history-details="${escapeHtml(row.date)}" type="button">Точный список</button>
+          ${state.canEdit ? `<button class="danger-btn" data-history-delete="${escapeHtml(row.date)}" type="button">Удалить дату</button>` : ''}
         </div>
-        ${row.lessonNote ? `<div class="history-log-note-preview">${escapeHtml(row.lessonNote)}</div>` : ''}
+      </article>
+    `).join('');
+  }
+
+  function renderEmptyState(title, message) {
+    return `
+      <div class="empty-state">
+        <div class="empty-state__badge">${escapeHtml(title)}</div>
+        <div>${escapeHtml(message)}</div>
       </div>
-      <div class="item-actions-cluster">
-        <button class="btn-action-outline" data-history-details="${row.date}">Детально</button>
-        ${state.canEdit ? `<button class="btn-action-destructive" data-history-delete="${row.date}">Удалить</button>` : ''}
-      </div>
-    </div>
-  `).join('');
-}
-
-function renderTabs() {
-  document.querySelectorAll('.nav-tab-item').forEach((button) => {
-    button.classList.toggle('active', button.dataset.tab === state.activeTab);
-  });
-  document.querySelectorAll('.tab-panel').forEach((panel) => {
-    panel.classList.toggle('active', panel.id === `panel-${state.activeTab}`);
-  });
-  document.querySelectorAll('.filter-chip').forEach((button) => {
-    button.classList.toggle('active', button.dataset.filter === state.filter);
-  });
-}
-
-function collectRecordsForSave() {
-  return state.students.map((student) => {
-    const record = state.records.get(student.studentId) || {};
-    const isAbsent = record.status === 'absent';
-    return {
-      studentId: student.studentId,
-      studentName: student.fullName,
-      status: isAbsent ? 'absent' : 'present',
-      reason: isAbsent ? (record.reason || '') : '',
-      comment: isAbsent ? (record.comment || '') : ''
-    };
-  });
-}
-
-function setStudentStatus(studentId, status, options = {}) {
-  if (!ensureCanEdit()) return;
-  const record = state.records.get(studentId);
-  const student = state.students.find((item) => item.studentId === studentId);
-  if (!record || !student) return;
-
-  record.status = status;
-  if (status === 'present') {
-    record.reason = '';
-    record.comment = '';
-    triggerHaptic('light');
-  } else if (!record.reason) {
-    record.reason = REASONS[0];
-    triggerHaptic('medium');
+    `;
   }
 
-  state.records.set(studentId, record);
-  state.dirty = true;
-  
-  renderStats();
-  renderAttendance();
-  updateNativeMainButton();
+  function renderTabs() {
+    document.querySelectorAll('.tab-btn').forEach((button) => {
+      button.classList.toggle('active', button.dataset.tab === state.activeTab);
+    });
 
-  if (status === 'absent' && options.openModal !== false) {
-    openReasonModal(studentId);
-  }
-}
+    document.querySelectorAll('.tab-panel').forEach((panel) => {
+      panel.classList.toggle('active', panel.id === `panel-${state.activeTab}`);
+    });
 
-function openReasonModal(studentId) {
-  const student = state.students.find((item) => item.studentId === studentId);
-  const record = state.records.get(studentId);
-  if (!student || !record) return;
+    document.querySelectorAll('.filter-chip').forEach((button) => {
+      button.classList.toggle('active', button.dataset.filter === state.filter);
+    });
 
-  state.editingStudentId = studentId;
-  els.modalStudentName.textContent = student.fullName;
-  els.reasonSelect.innerHTML = REASONS.map((reason) => `
-    <option value="${escapeHtml(reason)}" ${record.reason === reason ? 'selected' : ''}>${escapeHtml(reason)}</option>
-  `).join('');
-  els.reasonComment.value = record.comment || '';
-  
-  els.reasonModal.classList.remove('hidden');
-  document.body.classList.add('modal-open');
-  
-  if (tg && tg.BackButton) {
-    tg.BackButton.show();
-  }
-}
-
-function closeReasonModal() {
-  state.editingStudentId = null;
-  els.reasonModal.classList.add('hidden');
-  document.body.classList.remove('modal-open');
-  
-  if (tg && tg.BackButton && !state.openedHistoryDate) {
-    tg.BackButton.hide();
-  }
-}
-
-function saveReasonFromModal() {
-  if (!ensureCanEdit()) return;
-  if (!state.editingStudentId) return;
-  
-  const record = state.records.get(state.editingStudentId);
-  if (!record) return;
-  
-  record.status = 'absent';
-  record.reason = els.reasonSelect.value;
-  record.comment = els.reasonComment.value.trim();
-  
-  state.records.set(state.editingStudentId, record);
-  state.dirty = true;
-  
-  closeReasonModal();
-  renderStats();
-  renderAttendance();
-  updateNativeMainButton();
-  triggerHaptic('success');
-}
-
-function markPresentFromModal() {
-  if (!ensureCanEdit()) return;
-  if (!state.editingStudentId) return;
-  setStudentStatus(state.editingStudentId, 'present', { openModal: false });
-  closeReasonModal();
-}
-
-function openHistoryModal(date) {
-  const entry = state.history.find((item) => item.date === date);
-  if (!entry) return;
-
-  state.openedHistoryDate = date;
-  els.historyModalTitle.textContent = formatDateRu(entry.date);
-
-  const presentItems = (entry.presentList || []).map((item) => `<li>${escapeHtml(item.studentName)}</li>`).join('') || '<li>Список пуст</li>';
-  const absentItems = (entry.absentList || []).map((item) => `
-    <li>
-      <strong class="item-name-block">${escapeHtml(item.studentName)}</strong>
-      ${item.reason ? `<span class="reason-text-block">Причина: ${escapeHtml(item.reason)}</span>` : ''}
-      ${item.comment ? `<span class="comment-text-block">Комментарий: ${escapeHtml(item.comment)}</span>` : ''}
-    </li>
-  `).join('') || '<li>Список пуст</li>';
-
-  els.historyModalBody.innerHTML = `
-    <div class="summary-pill-container">
-      <span class="ui-status-badge present-badge">Присутствовали: ${entry.present}</span>
-      <span class="ui-status-badge absent-badge">Отсутствовали: ${entry.absent}</span>
-    </div>
-    ${entry.lessonNote ? `<div class="history-context-box"><strong>Заметки к уроку:</strong><p>${escapeHtml(entry.lessonNote)}</p></div>` : ''}
-    <div class="split-history-lists">
-      <section class="history-column-list">
-        <h5>Были на занятии</h5>
-        <ul class="native-render-list">${presentItems}</ul>
-      </section>
-      <section class="history-column-list border-danger-left">
-        <h5>Не явились</h5>
-        <ul class="native-render-list type-absent-list">${absentItems}</ul>
-      </section>
-    </div>
-  `;
-
-  els.historyModal.classList.remove('hidden');
-  document.body.classList.add('modal-open');
-  
-  if (tg && tg.BackButton) {
-    tg.BackButton.show();
-  }
-}
-
-function closeHistoryModal() {
-  state.openedHistoryDate = null;
-  els.historyModal.classList.add('hidden');
-  document.body.classList.remove('modal-open');
-  
-  if (tg && tg.BackButton && !state.editingStudentId) {
-    tg.BackButton.hide();
-  }
-}
-
-async function loadInitial() {
-  try {
-    const payload = await api('init', { date: state.date }, 'Загрузка данных...');
-    applyPayload(payload);
-  } catch (error) {
-    showToast(error.message || 'Ошибка первичной синхронизации данных');
-  }
-}
-
-async function saveJournal() {
-  if (!ensureCanEdit()) return;
-  try {
-    const payload = await api(
-      'saveAttendance',
-      { date: state.date, records: collectRecordsForSave(), lessonNote: state.lessonNote.trim() },
-      'Сохранение данных...'
-    );
-    applyPayload(payload);
-    triggerHaptic('success');
-  } catch (error) {
-    triggerHaptic('error');
-    showToast(error.message || 'Не удалось сохранить изменения в облако');
-  }
-}
-
-async function addStudent() {
-  if (!ensureCanEdit()) return;
-  const name = els.newStudentName.value.trim();
-  if (!name) {
-    triggerHaptic('error');
-    showToast('Заполните поле с именем ученика');
-    return;
+    updateTelegramChrome();
   }
 
-  try {
-    const payload = await api('addStudent', { name, date: state.date }, 'Добавление ученика...');
-    els.newStudentName.value = '';
-    applyPayload(payload);
-    state.activeTab = 'students';
-    renderTabs();
-    triggerHaptic('success');
-  } catch (error) {
-    showToast(error.message || 'Не удалось добавить запись');
-  }
-}
-
-async function deleteStudent(studentId) {
-  if (!ensureCanEdit()) return;
-  const student = state.students.find((item) => item.studentId === studentId);
-  if (!student) return;
-  
-  const ok = window.confirm(`Вы действительно хотите удалить ученика «${student.fullName}»? Это действие сотрет всю его историю посещений.`);
-  if (!ok) return;
-
-  try {
-    const payload = await api('deleteStudent', { studentId, date: state.date }, 'Удаление профиля...');
-    applyPayload(payload);
-    triggerHaptic('success');
-  } catch (error) {
-    showToast(error.message || 'Ошибка удаления записи');
-  }
-}
-
-async function deleteHistoryDate(date) {
-  if (!ensureCanEdit()) return;
-  const ok = window.confirm(`Удалить архивные данные за ${formatDateRu(date)}?`);
-  if (!ok) return;
-
-  try {
-    const payload = await api('deleteHistoryDate', { date: state.date, dateToDelete: date }, 'Удаление логов...');
-    closeHistoryModal();
-    applyPayload(payload);
-    triggerHaptic('success');
-  } catch (error) {
-    showToast(error.message || 'Не удалось удалить архивную точку');
-  }
-}
-
-async function clearHistory() {
-  if (!ensureCanEdit()) return;
-  if (!state.history.length) {
-    showToast('Архив уже пуст');
-    return;
+  function collectRecordsForSave() {
+    return state.students.map((student) => {
+      const studentId = normalizeStudentId(student.studentId);
+      const record = state.records.get(studentId) || {};
+      const isAbsent = record.status === 'absent';
+      return {
+        studentId,
+        studentName: student.fullName,
+        status: isAbsent ? 'absent' : 'present',
+        reason: isAbsent ? normalizeString(record.reason) : '',
+        comment: isAbsent ? normalizeString(record.comment) : ''
+      };
+    });
   }
 
-  const first = window.confirm('Внимание! Вы собираетесь очистить абсолютно ВСЮ историю журналов. Продолжить?');
-  if (!first) return;
-  const second = window.confirm('Повторное подтверждение: данные будут утеряны безвозвратно. Вы уверены?');
-  if (!second) return;
-
-  try {
-    const payload = await api('clearHistory', { date: state.date }, 'Сброс архива...');
-    closeHistoryModal();
-    applyPayload(payload);
-    triggerHaptic('success');
-  } catch (error) {
-    showToast(error.message || 'Ошибка глобальной очистки базы данных');
+  function markDirty() {
+    state.dirty = true;
+    renderDirtyState();
   }
-}
 
-function markAllPresent() {
-  if (!ensureCanEdit()) return;
-  state.students.forEach((student) => {
-    state.records.set(student.studentId, {
-      studentId: student.studentId,
+  function setStudentStatus(studentIdValue, status, options = {}) {
+    if (!ensureCanEdit()) return;
+
+    const studentId = normalizeStudentId(studentIdValue);
+    const student = state.students.find((item) => normalizeStudentId(item.studentId) === studentId);
+    if (!student) return;
+
+    const currentRecord = state.records.get(studentId) || {
+      studentId,
       studentName: student.fullName,
       status: 'present',
       reason: '',
       comment: ''
+    };
+
+    const nextRecord = {
+      ...currentRecord,
+      studentId,
+      studentName: student.fullName,
+      status: status === 'absent' ? 'absent' : 'present'
+    };
+
+    if (nextRecord.status === 'present') {
+      nextRecord.reason = '';
+      nextRecord.comment = '';
+    } else if (!nextRecord.reason) {
+      nextRecord.reason = REASONS[0];
+    }
+
+    state.records.set(studentId, nextRecord);
+    markDirty();
+    renderStats();
+    renderAttendance();
+    haptic();
+
+    if (nextRecord.status === 'absent' && options.openModal !== false) {
+      openReasonModal(studentId);
+    }
+  }
+
+  function openReasonModal(studentIdValue) {
+    if (!ensureCanEdit()) return;
+
+    const studentId = normalizeStudentId(studentIdValue);
+    const student = state.students.find((item) => normalizeStudentId(item.studentId) === studentId);
+    const record = state.records.get(studentId);
+    if (!student || !record) return;
+
+    state.editingStudentId = studentId;
+    els.modalStudentName.textContent = student.fullName;
+    els.reasonSelect.innerHTML = REASONS.map((reason) => `
+      <option value="${escapeHtml(reason)}" ${record.reason === reason ? 'selected' : ''}>${escapeHtml(reason)}</option>
+    `).join('');
+    els.reasonComment.value = record.comment || '';
+    els.reasonModal.classList.remove('hidden');
+    setTimeout(() => els.reasonSelect.focus({ preventScroll: true }), 40);
+    updateTelegramChrome();
+  }
+
+  function closeReasonModal() {
+    state.editingStudentId = null;
+    els.reasonModal.classList.add('hidden');
+    updateTelegramChrome();
+  }
+
+  function saveReasonFromModal() {
+    if (!ensureCanEdit()) return;
+    if (!state.editingStudentId) return;
+
+    const record = state.records.get(state.editingStudentId);
+    if (!record) return;
+
+    state.records.set(state.editingStudentId, {
+      ...record,
+      status: 'absent',
+      reason: normalizeString(els.reasonSelect.value),
+      comment: normalizeString(els.reasonComment.value)
     });
-  });
-  state.dirty = true;
-  renderStats();
-  renderAttendance();
-  updateNativeMainButton();
-  triggerHaptic('medium');
-  showToast('Все учащиеся отмечены как присутствующие');
-}
 
-function escapeHtml(value) {
-  return String(value || '')
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#039;');
-}
+    markDirty();
+    closeReasonModal();
+    renderStats();
+    renderAttendance();
+    haptic('success');
+  }
 
-function formatDateRu(isoDate) {
-  const date = new Date(`${isoDate}T00:00:00`);
-  return new Intl.DateTimeFormat('ru-RU', {
-    day: '2-digit',
-    month: 'long',
-    year: 'numeric'
-  }).format(date);
-}
+  function markPresentFromModal() {
+    if (!ensureCanEdit()) return;
+    if (!state.editingStudentId) return;
+    const studentId = state.editingStudentId;
+    closeReasonModal();
+    setStudentStatus(studentId, 'present', { openModal: false });
+  }
 
-function bindUI() {
-  els.lessonDate.addEventListener('change', async () => {
-    state.date = els.lessonDate.value;
+  function openHistoryModal(dateValue) {
+    const date = normalizeString(dateValue);
+    const entry = state.history.find((item) => item.date === date);
+    if (!entry) return;
+
+    state.openedHistoryDate = date;
+    els.historyModalTitle.textContent = formatDateRu(entry.date);
+
+    const presentItems = normalizeHistoryList(entry.presentList)
+      .map((item) => `<li>${escapeHtml(item.studentName)}</li>`)
+      .join('') || '<li>Никого нет</li>';
+
+    const absentItems = normalizeHistoryList(entry.absentList)
+      .map((item) => `
+        <li>
+          <strong>${escapeHtml(item.studentName)}</strong>
+          ${item.reason ? `<span>Причина: ${escapeHtml(item.reason)}</span>` : ''}
+          ${item.comment ? `<span>Комментарий: ${escapeHtml(item.comment)}</span>` : ''}
+        </li>
+      `)
+      .join('') || '<li>Никого нет</li>';
+
+    els.historyModalBody.innerHTML = `
+      <div class="history-modal-summary">
+        <span class="metric-pill success">Были: ${entry.present}</span>
+        <span class="metric-pill danger">Не были: ${entry.absent}</span>
+      </div>
+      ${entry.lessonNote ? `<div class="history-modal-note"><strong>Комментарий к занятию</strong><span>${escapeHtml(entry.lessonNote)}</span></div>` : ''}
+      <div class="history-details-grid">
+        <section class="history-details-block">
+          <h4>Были</h4>
+          <ul class="history-name-list">${presentItems}</ul>
+        </section>
+        <section class="history-details-block">
+          <h4>Не были</h4>
+          <ul class="history-name-list absent-list">${absentItems}</ul>
+        </section>
+      </div>
+    `;
+
+    els.historyModal.classList.remove('hidden');
+    updateTelegramChrome();
+  }
+
+  function normalizeHistoryList(list) {
+    return (Array.isArray(list) ? list : [])
+      .map((item) => ({
+        studentName: normalizeString(item.studentName ?? item.fullName ?? item.name),
+        reason: normalizeString(item.reason),
+        comment: normalizeString(item.comment)
+      }))
+      .filter((item) => item.studentName);
+  }
+
+  function closeHistoryModal() {
+    state.openedHistoryDate = null;
+    els.historyModal.classList.add('hidden');
+    updateTelegramChrome();
+  }
+
+  async function loadInitial() {
     try {
-      const payload = await api('getDay', { date: state.date }, 'Синхронизация даты...');
+      const payload = await api('init', { date: state.date }, 'Загружаем журнал…');
       applyPayload(payload);
     } catch (error) {
-      showToast(error.message || 'Не удалось загрузить данные за указанный день');
+      showToast(error.message || 'Не удалось загрузить журнал');
+      renderAccessMode();
+      updateTelegramChrome();
     }
-  });
+  }
 
-  if (els.lessonNoteInput) {
+  async function loadDay(date) {
+    const payload = await api('getDay', { date }, 'Загружаем выбранную дату…');
+    applyPayload(payload);
+  }
+
+  async function saveJournal() {
+    if (!ensureCanEdit()) return;
+
+    try {
+      const payload = await api(
+        'saveAttendance',
+        {
+          date: state.date,
+          records: collectRecordsForSave(),
+          lessonNote: normalizeString(state.lessonNote)
+        },
+        'Сохраняем журнал…'
+      );
+      applyPayload(payload);
+      haptic('success');
+    } catch (error) {
+      haptic('error');
+      showToast(error.message || 'Не удалось сохранить журнал');
+    }
+  }
+
+  async function addStudent() {
+    if (!ensureCanEdit()) return;
+
+    const name = normalizeString(els.newStudentName.value);
+    if (!name) {
+      showToast('Введите имя нового ученика');
+      return;
+    }
+
+    try {
+      const payload = await api('addStudent', { name, date: state.date }, 'Добавляем ученика…');
+      els.newStudentName.value = '';
+      applyPayload(payload);
+      setActiveTab('students');
+      haptic('success');
+    } catch (error) {
+      haptic('error');
+      showToast(error.message || 'Не удалось добавить ученика');
+    }
+  }
+
+  async function deleteStudent(studentIdValue) {
+    if (!ensureCanEdit()) return;
+
+    const studentId = normalizeStudentId(studentIdValue);
+    const student = state.students.find((item) => normalizeStudentId(item.studentId) === studentId);
+    if (!student) return;
+
+    const ok = await confirmAction({
+      title: 'Удалить ученика?',
+      text: `«${student.fullName}» будет удалён из списка. Если сервер удаляет строки физически, действие нельзя быстро отменить.`,
+      acceptText: 'Удалить'
+    });
+    if (!ok) return;
+
+    try {
+      const payload = await api('deleteStudent', { studentId, date: state.date }, 'Удаляем ученика…');
+      applyPayload(payload);
+      haptic('success');
+    } catch (error) {
+      haptic('error');
+      showToast(error.message || 'Не удалось удалить ученика');
+    }
+  }
+
+  async function deleteHistoryDate(dateValue) {
+    if (!ensureCanEdit()) return;
+
+    const dateToDelete = normalizeString(dateValue);
+    const ok = await confirmAction({
+      title: 'Удалить дату?',
+      text: `Сохранение за ${formatDateRu(dateToDelete)} будет удалено из истории.`,
+      acceptText: 'Удалить дату'
+    });
+    if (!ok) return;
+
+    try {
+      const payload = await api('deleteHistoryDate', { date: state.date, dateToDelete }, 'Удаляем дату…');
+      closeHistoryModal();
+      applyPayload(payload);
+      haptic('success');
+    } catch (error) {
+      haptic('error');
+      showToast(error.message || 'Не удалось удалить дату');
+    }
+  }
+
+  async function clearHistory() {
+    if (!ensureCanEdit()) return;
+
+    if (!state.history.length) {
+      showToast('История уже пустая');
+      return;
+    }
+
+    const first = await confirmAction({
+      title: 'Очистить всю историю?',
+      text: 'Будут удалены все сохранённые даты журнала. Список учеников останется.',
+      acceptText: 'Очистить'
+    });
+    if (!first) return;
+
+    const second = await confirmAction({
+      title: 'Последнее подтверждение',
+      text: 'Историю нельзя будет восстановить из интерфейса приложения.',
+      acceptText: 'Да, очистить'
+    });
+    if (!second) return;
+
+    try {
+      const payload = await api('clearHistory', { date: state.date }, 'Очищаем историю…');
+      closeHistoryModal();
+      applyPayload(payload);
+      haptic('success');
+    } catch (error) {
+      haptic('error');
+      showToast(error.message || 'Не удалось очистить историю');
+    }
+  }
+
+  function markAllPresent() {
+    if (!ensureCanEdit()) return;
+
+    state.students.forEach((student) => {
+      const studentId = normalizeStudentId(student.studentId);
+      state.records.set(studentId, {
+        studentId,
+        studentName: student.fullName,
+        status: 'present',
+        reason: '',
+        comment: ''
+      });
+    });
+
+    markDirty();
+    renderStats();
+    renderAttendance();
+    haptic('success');
+    showToast('Все отмечены как присутствующие');
+  }
+
+  async function confirmAction({ title, text, acceptText = 'Подтвердить', cancelText = 'Отмена' }) {
+    if (state.pendingConfirmResolve) {
+      state.pendingConfirmResolve(false);
+      state.pendingConfirmResolve = null;
+    }
+
+    els.confirmTitle.textContent = title;
+    els.confirmText.textContent = text;
+    els.confirmAcceptBtn.textContent = acceptText;
+    els.confirmCancelBtn.textContent = cancelText;
+    els.confirmModal.classList.remove('hidden');
+    updateTelegramChrome();
+
+    return new Promise((resolve) => {
+      state.pendingConfirmResolve = resolve;
+    });
+  }
+
+  function resolveConfirm(value) {
+    els.confirmModal.classList.add('hidden');
+    if (state.pendingConfirmResolve) {
+      state.pendingConfirmResolve(Boolean(value));
+      state.pendingConfirmResolve = null;
+    }
+    updateTelegramChrome();
+  }
+
+  async function handleDateChange() {
+    const nextDate = els.lessonDate.value || todayLocalISO();
+    const previousDate = state.date;
+
+    if (nextDate === previousDate) return;
+
+    if (state.canEdit && state.dirty) {
+      const ok = await confirmAction({
+        title: 'Перейти без сохранения?',
+        text: 'На текущей дате есть несохранённые изменения. При переходе они будут потеряны.',
+        acceptText: 'Перейти'
+      });
+
+      if (!ok) {
+        els.lessonDate.value = previousDate;
+        return;
+      }
+    }
+
+    state.date = nextDate;
+
+    try {
+      await loadDay(nextDate);
+    } catch (error) {
+      els.lessonDate.value = previousDate;
+      state.date = previousDate;
+      showToast(error.message || 'Не удалось загрузить дату');
+    }
+  }
+
+  function setActiveTab(tab) {
+    if (!['attendance', 'students', 'history'].includes(tab)) return;
+    state.activeTab = tab;
+    renderTabs();
+    haptic();
+  }
+
+  function bindUI() {
+    els.lessonDate.addEventListener('change', handleDateChange);
+
     els.lessonNoteInput.addEventListener('input', () => {
       if (!state.canEdit) return;
       state.lessonNote = els.lessonNoteInput.value || '';
-      state.dirty = true;
-      updateNativeMainButton();
+      markDirty();
+    });
+
+    els.searchInput.addEventListener('input', () => {
+      state.search = els.searchInput.value || '';
+      renderAttendance();
+    });
+
+    els.filterRow.addEventListener('click', (event) => {
+      const button = event.target.closest('[data-filter]');
+      if (!button) return;
+      state.filter = button.dataset.filter;
+      renderTabs();
+      renderAttendance();
+      haptic();
+    });
+
+    document.querySelectorAll('.tab-btn').forEach((button) => {
+      button.addEventListener('click', () => setActiveTab(button.dataset.tab));
+    });
+
+    els.studentsList.addEventListener('click', (event) => {
+      const statusButton = event.target.closest('[data-status]');
+      if (statusButton) {
+        setStudentStatus(statusButton.dataset.studentId, statusButton.dataset.status, {
+          openModal: statusButton.dataset.status === 'absent'
+        });
+        return;
+      }
+
+      const reasonButton = event.target.closest('[data-edit-reason]');
+      if (reasonButton) {
+        openReasonModal(reasonButton.dataset.editReason);
+      }
+    });
+
+    els.studentsAdminList.addEventListener('click', (event) => {
+      const deleteButton = event.target.closest('[data-delete-student]');
+      if (!deleteButton) return;
+      deleteStudent(deleteButton.dataset.deleteStudent);
+    });
+
+    els.historyList.addEventListener('click', (event) => {
+      const detailsButton = event.target.closest('[data-history-details]');
+      if (detailsButton) {
+        openHistoryModal(detailsButton.dataset.historyDetails);
+        return;
+      }
+
+      const deleteButton = event.target.closest('[data-history-delete]');
+      if (deleteButton) {
+        deleteHistoryDate(deleteButton.dataset.historyDelete);
+      }
+    });
+
+    els.markAllPresentBtn.addEventListener('click', markAllPresent);
+    els.saveBtn.addEventListener('click', saveJournal);
+    els.saveBannerBtn.addEventListener('click', saveJournal);
+    els.addStudentForm.addEventListener('submit', (event) => {
+      event.preventDefault();
+      addStudent();
+    });
+    els.clearHistoryBtn.addEventListener('click', clearHistory);
+
+    els.closeModalBtn.addEventListener('click', closeReasonModal);
+    els.saveReasonBtn.addEventListener('click', saveReasonFromModal);
+    els.markPresentFromModalBtn.addEventListener('click', markPresentFromModal);
+    els.reasonModal.addEventListener('click', (event) => {
+      if (event.target === els.reasonModal) closeReasonModal();
+    });
+
+    els.closeHistoryModalBtn.addEventListener('click', closeHistoryModal);
+    els.historyModal.addEventListener('click', (event) => {
+      if (event.target === els.historyModal) closeHistoryModal();
+    });
+
+    els.confirmCancelBtn.addEventListener('click', () => resolveConfirm(false));
+    els.confirmAcceptBtn.addEventListener('click', () => resolveConfirm(true));
+    els.confirmModal.addEventListener('click', (event) => {
+      if (event.target === els.confirmModal) resolveConfirm(false);
+    });
+
+    document.addEventListener('keydown', (event) => {
+      if (event.key !== 'Escape') return;
+      if (!els.reasonModal.classList.contains('hidden')) closeReasonModal();
+      else if (!els.historyModal.classList.contains('hidden')) closeHistoryModal();
+      else if (!els.confirmModal.classList.contains('hidden')) resolveConfirm(false);
+    });
+
+    window.addEventListener('beforeunload', (event) => {
+      if (!state.canEdit || !state.dirty) return;
+      event.preventDefault();
+      event.returnValue = '';
     });
   }
 
-  els.searchInput.addEventListener('input', () => {
-    state.search = els.searchInput.value || '';
-    renderAttendance();
-  });
+  function getInitials(name) {
+    const parts = normalizeString(name).split(/\s+/).filter(Boolean);
+    if (!parts.length) return '•';
+    const first = parts[0]?.[0] || '';
+    const second = parts.length > 1 ? parts[1]?.[0] || '' : '';
+    return (first + second).toLocaleUpperCase('ru-RU');
+  }
 
-  els.filterRow.addEventListener('click', (event) => {
-    const button = event.target.closest('[data-filter]');
-    if (!button) return;
-    triggerHaptic('light');
-    state.filter = button.dataset.filter;
-    renderTabs();
-    renderAttendance();
-  });
+  function escapeHtml(value) {
+    return String(value ?? '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#039;');
+  }
 
-  document.querySelectorAll('.nav-tab-item').forEach((button) => {
-    button.addEventListener('click', () => {
-      triggerHaptic('light');
-      state.activeTab = button.dataset.tab;
-      renderTabs();
-      updateNativeMainButton();
-    });
-  });
+  function formatDateRu(isoDate) {
+    const value = normalizeString(isoDate);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return value || 'Дата не указана';
 
-  els.studentsList.addEventListener('click', (event) => {
-    const statusButton = event.target.closest('[data-status]');
-    if (statusButton) {
-      const studentId = statusButton.dataset.studentId;
-      const newStatus = statusButton.dataset.status;
-      setStudentStatus(studentId, newStatus, { openModal: newStatus === 'absent' });
-      return;
-    }
+    const date = new Date(`${value}T00:00:00`);
+    return new Intl.DateTimeFormat('ru-RU', {
+      day: '2-digit',
+      month: 'long',
+      year: 'numeric'
+    }).format(date);
+  }
 
-    const reasonButton = event.target.closest('[data-edit-reason]');
-    if (reasonButton) {
-      triggerHaptic('light');
-      openReasonModal(reasonButton.dataset.editReason);
-    }
-  });
+  function bootstrap() {
+    state.date = todayLocalISO();
+    els.lessonDate.value = state.date;
+    initTelegram();
+    bindUI();
+    renderAccessMode();
+    renderStats();
+    renderDirtyState();
+    loadInitial();
+  }
 
-  els.studentsAdminList.addEventListener('click', (event) => {
-    const deleteButton = event.target.closest('[data-delete-student]');
-    if (!deleteButton) return;
-    triggerHaptic('medium');
-    deleteStudent(deleteButton.dataset.deleteStudent);
-  });
-
-  els.historyList.addEventListener('click', (event) => {
-    const detailsButton = event.target.closest('[data-history-details]');
-    if (detailsButton) {
-      triggerHaptic('light');
-      openHistoryModal(detailsButton.dataset.historyDetails);
-      return;
-    }
-    const deleteButton = event.target.closest('[data-history-delete]');
-    if (deleteButton) {
-      triggerHaptic('medium');
-      deleteHistoryDate(deleteButton.dataset.historyDelete);
-    }
-  });
-
-  els.markAllPresentBtn.addEventListener('click', markAllPresent);
-  els.clearHistoryBtn.addEventListener('click', clearHistory);
-  els.addStudentBtn.addEventListener('click', addStudent);
-
-  els.newStudentName.addEventListener('keydown', (event) => {
-    if (event.key === 'Enter') {
-      event.preventDefault();
-      addStudent();
-    }
-  });
-
-  els.saveReasonBtn.addEventListener('click', saveReasonFromModal);
-  els.markPresentFromModalBtn.addEventListener('click', markPresentFromModal);
-  
-  els.reasonModal.addEventListener('click', (event) => {
-    if (event.target === els.reasonModal) closeReasonModal();
-  });
-  els.historyModal.addEventListener('click', (event) => {
-    if (event.target === els.historyModal) closeHistoryModal();
-  });
-}
-
-(function bootstrap() {
-  state.date = todayLocalISO();
-  els.lessonDate.value = state.date;
-  initTelegram();
-  bindUI();
-  loadInitial();
+  bootstrap();
 })();
