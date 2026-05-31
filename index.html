@@ -14,15 +14,14 @@
       <div class="top-row">
         <div>
           <div class="eyebrow">Telegram Mini App</div>
-          <h1>Журнал посещения</h1>
-          <p class="top-subtitle">📝</p>
+          <h1>Журнал</h1>
         </div>
         <div class="user-chip" id="userBadge">Вход…</div>
       </div>
 
       <div class="quick-grid">
         <div class="quick-card">
-          <span>Дата занятия</span>
+          <span>Дата</span>
           <input type="date" id="lessonDate">
         </div>
         <div class="quick-card stat-card">
@@ -38,11 +37,10 @@
           <strong id="statAbsent">0</strong>
         </div>
       </div>
-
       <div class="access-note" id="accessNote">Проверяем права доступа…</div>
     </header>
 
-    <nav class="segmented card" aria-label="Разделы">
+    <nav class="segmented" aria-label="Разделы">
       <button class="segmented-btn active" data-tab="attendance">Посещение</button>
       <button class="segmented-btn" data-tab="students">Ученики</button>
       <button class="segmented-btn" data-tab="history">История</button>
@@ -50,71 +48,44 @@
 
     <main>
       <section class="tab-panel active" id="panel-attendance">
-        <section class="card section-card">
-          <div class="section-heading">
-            <div>
-              <h2>Отметки за день</h2>
-              <p id="attendanceHelp">Поиск и фильтр ускоряют работу, а напротив каждого имени показывается накопительный счётчик посещений и пропусков.</p>
-            </div>
-            <div class="actions-grid">
-              <button class="secondary-btn" id="markAllPresentBtn">Отметить всех как присутствующих</button>
-              <button class="primary-btn" id="saveBtn">Сохранить журнал</button>
-            </div>
+        <div class="toolbar-stack">
+          <input type="search" id="searchInput" placeholder="Поиск ученика">
+          <div class="filter-row" id="filterRow">
+            <button class="filter-chip active" data-filter="all">Все</button>
+            <button class="filter-chip" data-filter="absent">Пропустили</button>
+            <button class="filter-chip" data-filter="present">Присутствовали</button>
           </div>
+        </div>
 
-          <div class="lesson-note-card">
-            <label class="field-label" for="lessonNoteInput">Комментарий или дополнение к занятию</label>
-            <textarea id="lessonNoteInput" placeholder="Например: мастер-класс, торжественное собрание, нерабочее занятие"></textarea>
-            <div class="lesson-note-view" id="lessonNoteView">Комментарий к занятию не указан.</div>
-          </div>
+        <div class="lesson-note-card card">
+          <label class="field-label" style="font-size:12px; font-weight:600; color:var(--hint);" for="lessonNoteInput">Заметка к занятию</label>
+          <textarea id="lessonNoteInput" placeholder="Мастер-класс, зачет и др..."></textarea>
+          <div class="lesson-note-view" id="lessonNoteView">Заметка не указана.</div>
+        </div>
 
-          <div class="toolbar-stack">
-            <input type="search" id="searchInput" placeholder="Поиск ученика по имени">
-            <div class="filter-row" id="filterRow">
-              <button class="filter-chip active" data-filter="all">Все</button>
-              <button class="filter-chip" data-filter="absent">Только отсутствующие</button>
-              <button class="filter-chip" data-filter="present">Только присутствующие</button>
-            </div>
-          </div>
-
-          <div id="studentsList" class="attendance-list"></div>
-        </section>
+        <div id="studentsList" class="attendance-list"></div>
       </section>
 
       <section class="tab-panel" id="panel-students">
-        <section class="card section-card">
-          <div class="section-heading compact-gap">
-            <div>
-              <h2>Ученики</h2>
-              <p id="studentsHelp">Список учеников и счётчики посещений доступны для просмотра.</p>
-            </div>
-          </div>
-
-          <div class="add-row">
-            <input type="text" id="newStudentName" placeholder="Имя нового ученика">
-            <button class="primary-btn" id="addStudentBtn">Добавить</button>
-          </div>
-
-          <div id="studentsAdminList" class="students-admin-list"></div>
-        </section>
+        <div class="add-row">
+          <input type="text" id="newStudentName" placeholder="Имя нового ученика">
+          <button class="primary-btn" id="addStudentBtn">Добавить</button>
+        </div>
+        <div id="studentsAdminList" class="students-admin-list"></div>
       </section>
 
       <section class="tab-panel" id="panel-history">
-        <section class="card section-card">
-          <div class="section-heading compact-gap">
-            <div>
-              <h2>История всех сохранений</h2>
-              <p id="historyHelp">Здесь показываются все сохранённые даты. Откройте точный список, чтобы посмотреть кто был и кто отсутствовал.</p>
-            </div>
-            <div class="history-head-actions">
-              <button class="danger-btn" id="clearHistoryBtn">Очистить всю историю</button>
-            </div>
-          </div>
-
-          <div id="historyList" class="history-list"></div>
-        </section>
+        <div style="margin-bottom:12px; text-align:right;">
+          <button class="danger-btn" id="clearHistoryBtn" style="padding:8px 12px; font-size:12px;">Очистить историю</button>
+        </div>
+        <div id="historyList" class="history-list"></div>
       </section>
     </main>
+  </div>
+
+  <div class="native-bottom-bar" id="bottomBar">
+    <button class="secondary-btn" id="markAllPresentBtn" style="flex:1;">Все были</button>
+    <button class="primary-btn" id="saveBtn" style="flex:1.5;">Сохранить журнал</button>
   </div>
 
   <div class="modal-overlay hidden" id="reasonModal">
@@ -124,46 +95,34 @@
           <div class="eyebrow">Причина отсутствия</div>
           <h3 id="modalStudentName">Ученик</h3>
         </div>
-        <button class="icon-btn" id="closeModalBtn" aria-label="Закрыть">✕</button>
+        <button class="icon-btn" id="closeModalBtn">✕</button>
       </div>
-
       <div class="modal-body">
-        <label class="field-label" for="reasonSelect">Причина</label>
         <select id="reasonSelect"></select>
-
-        <label class="field-label" for="reasonComment">Комментарий</label>
-        <textarea id="reasonComment" placeholder="Например: предупредили заранее, болеет, уехал(а)"></textarea>
+        <textarea id="reasonComment" placeholder="Дополнительный комментарий..."></textarea>
       </div>
-
       <div class="modal-actions">
-        <button class="secondary-btn" id="markPresentFromModalBtn">Вернуть в присутствующие</button>
-        <button class="primary-btn" id="saveReasonBtn">Сохранить причину</button>
+        <button class="secondary-btn" id="markPresentFromModalBtn">Был(а)</button>
+        <button class="primary-btn" id="saveReasonBtn">Готово</button>
       </div>
     </div>
   </div>
 
   <div class="modal-overlay hidden" id="historyModal">
-    <div class="modal-card history-modal-card">
+    <div class="modal-card">
       <div class="modal-header">
-        <div>
-          <div class="eyebrow">Точный список</div>
-          <h3 id="historyModalTitle">Сохранение</h3>
-        </div>
-        <button class="icon-btn" id="closeHistoryModalBtn" aria-label="Закрыть">✕</button>
+        <h3 id="historyModalTitle">Детали сохранения</h3>
+        <button class="icon-btn" id="closeHistoryModalBtn">✕</button>
       </div>
-
-      <div class="modal-body history-modal-body" id="historyModalBody"></div>
+      <div class="modal-body" id="historyModalBody" style="max-height:60vh; overflow-y:auto;"></div>
     </div>
   </div>
 
   <div class="loading-overlay hidden" id="loadingOverlay">
-    <div class="loader-card">
-      <div class="spinner"></div>
-      <p id="loadingText">Загрузка…</p>
-    </div>
+    <div class="loader-card"><div class="spinner"></div><p id="loadingText" style="margin:0; font-size:13px;">Загрузка…</p></div>
   </div>
-
   <div class="toast" id="toast"></div>
+
   <script src="./app.js"></script>
 </body>
 </html>
