@@ -2,126 +2,173 @@
 <html lang="ru">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <title>Журнал посещения</title>
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
   <script src="./config.js"></script>
   <link rel="stylesheet" href="./styles.css">
 </head>
 <body>
-  <div class="app-shell">
-    <header class="top-card card">
-      <div class="top-row">
-        <div>
-          <div class="eyebrow">Telegram Mini App</div>
-          <h1>Журнал</h1>
+  <div class="app-container">
+    
+    <header class="app-header">
+      <div class="header-main">
+        <div class="brand-zone">
+          <span class="brand-badge">Mini App</span>
+          <h1>Журнал посещения</h1>
         </div>
-        <div class="user-chip" id="userBadge">Вход…</div>
+        <div class="identity-badge" id="userBadge">Загрузка…</div>
       </div>
 
-      <div class="quick-grid">
-        <div class="quick-card">
-          <span>Дата</span>
-          <input type="date" id="lessonDate">
+      <div class="dashboard-card">
+        <div class="date-picker-wrapper">
+          <label for="lessonDate" class="input-minimal-label">Дата занятия</label>
+          <input type="date" id="lessonDate" class="input-minimal">
         </div>
-        <div class="quick-card stat-card">
-          <span>Всего</span>
-          <strong id="statTotal">0</strong>
-        </div>
-        <div class="quick-card stat-card success">
-          <span>Были</span>
-          <strong id="statPresent">0</strong>
-        </div>
-        <div class="quick-card stat-card danger">
-          <span>Не были</span>
-          <strong id="statAbsent">0</strong>
+        <div class="stats-counter-row">
+          <div class="stat-item">
+            <span class="stat-label">Всего</span>
+            <span class="stat-value" id="statTotal">0</span>
+          </div>
+          <div class="stat-item status-present-color">
+            <span class="stat-label">Были</span>
+            <span class="stat-value" id="statPresent">0</span>
+          </div>
+          <div class="stat-item status-absent-color">
+            <span class="stat-label">Н/Я</span>
+            <span class="stat-value" id="statAbsent">0</span>
+          </div>
         </div>
       </div>
-      <div class="access-note" id="accessNote">Проверяем права доступа…</div>
+      <div class="system-notice" id="accessNote">Синхронизация с сервером…</div>
     </header>
 
-    <nav class="segmented" aria-label="Разделы">
-      <button class="segmented-btn active" data-tab="attendance">Посещение</button>
-      <button class="segmented-btn" data-tab="students">Ученики</button>
-      <button class="segmented-btn" data-tab="history">История</button>
+    <nav class="navigation-bar" aria-label="Главное меню">
+      <button class="nav-tab-item active" data-tab="attendance">
+        <span class="nav-icon">📝</span>
+        <span class="nav-text">Посещение</span>
+      </button>
+      <button class="nav-tab-item" data-tab="students">
+        <span class="nav-icon">👥</span>
+        <span class="nav-text">Ученики</span>
+      </button>
+      <button class="nav-tab-item" data-tab="history">
+        <span class="nav-icon">⏳</span>
+        <span class="nav-text">История</span>
+      </button>
     </nav>
 
-    <main>
+    <main class="content-wrapper">
+      
       <section class="tab-panel active" id="panel-attendance">
-        <div class="toolbar-stack">
-          <input type="search" id="searchInput" placeholder="Поиск ученика">
-          <div class="filter-row" id="filterRow">
-            <button class="filter-chip active" data-filter="all">Все</button>
-            <button class="filter-chip" data-filter="absent">Пропустили</button>
+        <div class="action-banner">
+          <div class="banner-info">
+            <h2 class="panel-title">Отметки присутствия</h2>
+            <p class="panel-description" id="attendanceHelp">Нажмите на карточку ученика для быстрого изменения статуса.</p>
+          </div>
+          <button class="action-link-btn" id="markAllPresentBtn">Отметить всех присутствующими</button>
+        </div>
+
+        <div class="interactive-form-group">
+          <label class="field-label" for="lessonNoteInput">Заметки к текущему занятию</label>
+          <textarea id="lessonNoteInput" placeholder="Тема урока, домашнее задание или важные примечания..."></textarea>
+          <div class="static-note-display hidden" id="lessonNoteView"></div>
+        </div>
+
+        <div class="search-filter-sticky">
+          <div class="search-wrapper">
+            <span class="search-icon">🔍</span>
+            <input type="search" id="searchInput" placeholder="Поиск по имени ученика...">
+          </div>
+          <div class="filter-chips-scroll" id="filterRow">
+            <button class="filter-chip active" data-filter="all">Все результаты</button>
             <button class="filter-chip" data-filter="present">Присутствовали</button>
+            <button class="filter-chip" data-filter="absent">Отсутствовали</button>
           </div>
         </div>
 
-        <div class="lesson-note-card card">
-          <label class="field-label" style="font-size:12px; font-weight:600; color:var(--hint);" for="lessonNoteInput">Заметка к занятию</label>
-          <textarea id="lessonNoteInput" placeholder="Мастер-класс, зачет и др..."></textarea>
-          <div class="lesson-note-view" id="lessonNoteView">Заметка не указана.</div>
-        </div>
-
-        <div id="studentsList" class="attendance-list"></div>
+        <div id="studentsList" class="dynamic-list-stack"></div>
       </section>
 
       <section class="tab-panel" id="panel-students">
-        <div class="add-row">
-          <input type="text" id="newStudentName" placeholder="Имя нового ученика">
-          <button class="primary-btn" id="addStudentBtn">Добавить</button>
+        <div class="action-banner">
+          <h2 class="panel-title">Управление составом</h2>
+          <p class="panel-description" id="studentsHelp">Добавление новых участников в единую базу данных.</p>
         </div>
-        <div id="studentsAdminList" class="students-admin-list"></div>
+
+        <div class="add-student-inline" id="addStudentControls">
+          <input type="text" id="newStudentName" placeholder="Фамилия и имя ученика">
+          <button class="btn-primary-accent" id="addStudentBtn">Добавить</button>
+        </div>
+
+        <div id="studentsAdminList" class="dynamic-list-stack gap-tight"></div>
       </section>
 
       <section class="tab-panel" id="panel-history">
-        <div style="margin-bottom:12px; text-align:right;">
-          <button class="danger-btn" id="clearHistoryBtn" style="padding:8px 12px; font-size:12px;">Очистить историю</button>
+        <div class="action-banner-split">
+          <div>
+            <h2 class="panel-title">Архив журналов</h2>
+            <p class="panel-description" id="historyHelp">Хронология всех ранее сохранённых занятий.</p>
+          </div>
+          <button class="btn-danger-light" id="clearHistoryBtn">Очистить архив</button>
         </div>
-        <div id="historyList" class="history-list"></div>
+
+        <div id="historyList" class="dynamic-list-stack"></div>
       </section>
     </main>
   </div>
 
-  <div class="native-bottom-bar" id="bottomBar">
-    <button class="secondary-btn" id="markAllPresentBtn" style="flex:1;">Все были</button>
-    <button class="primary-btn" id="saveBtn" style="flex:1.5;">Сохранить журнал</button>
-  </div>
-
-  <div class="modal-overlay hidden" id="reasonModal">
-    <div class="modal-card">
-      <div class="modal-header">
-        <div>
-          <div class="eyebrow">Причина отсутствия</div>
+  <div class="drawer-overlay hidden" id="reasonModal">
+    <div class="drawer-sheet">
+      <div class="drawer-header">
+        <div class="drawer-indicator"></div>
+        <div class="drawer-title-block">
+          <span class="drawer-eyebrow">Редактирование статуса</span>
           <h3 id="modalStudentName">Ученик</h3>
         </div>
-        <button class="icon-btn" id="closeModalBtn">✕</button>
       </div>
-      <div class="modal-body">
-        <select id="reasonSelect"></select>
-        <textarea id="reasonComment" placeholder="Дополнительный комментарий..."></textarea>
+
+      <div class="drawer-body">
+        <div class="form-element">
+          <label class="field-label" for="reasonSelect">Причина неявки</label>
+          <select id="reasonSelect" class="select-modern"></select>
+        </div>
+
+        <div class="form-element">
+          <label class="field-label" for="reasonComment">Дополнительный комментарий</label>
+          <textarea id="reasonComment" placeholder="Укажите детали (например, до какого числа справка)..."></textarea>
+        </div>
       </div>
-      <div class="modal-actions">
-        <button class="secondary-btn" id="markPresentFromModalBtn">Был(а)</button>
-        <button class="primary-btn" id="saveReasonBtn">Готово</button>
+
+      <div class="drawer-actions">
+        <button class="btn-secondary-action" id="markPresentFromModalBtn">Вернуть статус «Был(а)»</button>
+        <button class="btn-primary-accent" id="saveReasonBtn">Применить изменения</button>
       </div>
     </div>
   </div>
 
-  <div class="modal-overlay hidden" id="historyModal">
-    <div class="modal-card">
-      <div class="modal-header">
-        <h3 id="historyModalTitle">Детали сохранения</h3>
-        <button class="icon-btn" id="closeHistoryModalBtn">✕</button>
+  <div class="drawer-overlay hidden" id="historyModal">
+    <div class="drawer-sheet expanded-sheet">
+      <div class="drawer-header">
+        <div class="drawer-indicator"></div>
+        <div class="drawer-title-block">
+          <span class="drawer-eyebrow">Детализированный отчёт</span>
+          <h3 id="historyModalTitle">Дата</h3>
+        </div>
       </div>
-      <div class="modal-body" id="historyModalBody" style="max-height:60vh; overflow-y:auto;"></div>
+
+      <div class="drawer-body scrollable-body" id="historyModalBody"></div>
     </div>
   </div>
 
-  <div class="loading-overlay hidden" id="loadingOverlay">
-    <div class="loader-card"><div class="spinner"></div><p id="loadingText" style="margin:0; font-size:13px;">Загрузка…</p></div>
+  <div class="global-loader hidden" id="loadingOverlay">
+    <div class="loader-content">
+      <div class="ui-spinner"></div>
+      <p id="loadingText">Синхронизация данных...</p>
+    </div>
   </div>
-  <div class="toast" id="toast"></div>
+
+  <div class="native-toast" id="toast"></div>
 
   <script src="./app.js"></script>
 </body>
