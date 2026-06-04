@@ -7,10 +7,11 @@
   <meta name="theme-color" content="#101828">
   <title>Журнал посещения</title>
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
-  <script src="./config.js"></script>
+  <script src="./config.js" defer></script>
   <link rel="stylesheet" href="./styles.css">
 </head>
 <body>
+  <!-- Задний план со сглаженными градиентными сферами -->
   <div class="app-bg" aria-hidden="true">
     <span class="app-bg__orb app-bg__orb--one"></span>
     <span class="app-bg__orb app-bg__orb--two"></span>
@@ -18,34 +19,48 @@
   </div>
 
   <div class="app-shell" id="appShell">
+    <!-- Шапка-профиль и основные показатели -->
     <header class="hero-card surface-card">
       <div class="hero-card__top">
         <div class="brand-lockup">
           <div class="brand-mark" aria-hidden="true">
-            <svg viewBox="0 0 32 32" role="img" focusable="false">
-              <path d="M9.75 5.5h12.5A3.25 3.25 0 0 1 25.5 8.75v14.5a3.25 3.25 0 0 1-3.25 3.25H9.75A3.25 3.25 0 0 1 6.5 23.25V8.75A3.25 3.25 0 0 1 9.75 5.5Z" fill="currentColor" opacity=".16"/>
-              <path d="M11 11.25h10M11 16h10M11 20.75h6.25" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/>
-              <path d="M23.5 9.25 25.75 7" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+              <polyline points="14 2 14 8 20 8"/>
+              <line x1="16" y1="13" x2="8" y2="13"/>
+              <line x1="16" y1="17" x2="8" y2="17"/>
+              <polyline points="10 9 9 9 8 9"/>
             </svg>
           </div>
           <div>
             <p class="eyebrow">Telegram Mini App</p>
-            <h1>Журнал посещения</h1>
+            <h1>Журнал</h1>
           </div>
         </div>
 
         <div class="user-stack">
-          <div class="status-chip" id="userBadge">Вход…</div>
+          <div class="status-chip" id="userBadge">Загрузка...</div>
           <div class="mode-chip" id="modeBadge">Проверка доступа</div>
         </div>
       </div>
 
-      <p class="hero-copy" id="accessNote">Загружаем журнал и проверяем права доступа.</p>
+      <p class="hero-copy" id="accessNote">Синхронизируем базу данных учеников...</p>
 
+      <!-- Сводная панель статистики -->
       <section class="dashboard-grid" aria-label="Сводка за выбранный день">
         <label class="date-card metric-card" for="lessonDate">
           <span class="metric-label">Дата занятия</span>
-          <input type="date" id="lessonDate" autocomplete="off">
+          <div class="date-input-wrapper">
+            <input type="date" id="lessonDate" autocomplete="off">
+            <span class="date-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <rect x="3" y="4" width="18" height="18" rx="2" ry="2"/>
+                <line x1="16" y1="2" x2="16" y2="6"/>
+                <line x1="8" y1="2" x2="8" y2="6"/>
+                <line x1="3" y1="10" x2="21" y2="10"/>
+              </svg>
+            </span>
+          </div>
         </label>
 
         <div class="metric-card" aria-live="polite">
@@ -54,19 +69,20 @@
         </div>
 
         <div class="metric-card metric-card--success" aria-live="polite">
-          <span class="metric-label">Были</span>
+          <span class="metric-label">Присутствовали</span>
           <strong class="metric-number" id="statPresent">0</strong>
         </div>
 
         <div class="metric-card metric-card--danger" aria-live="polite">
-          <span class="metric-label">Не были</span>
+          <span class="metric-label">Пропустили</span>
           <strong class="metric-number" id="statAbsent">0</strong>
         </div>
       </section>
 
+      <!-- Прогресс посещаемости -->
       <div class="progress-card" aria-label="Прогресс посещения">
         <div class="progress-card__head">
-          <span id="progressLabel">Посещение не рассчитано</span>
+          <span id="progressLabel">Расчет явки...</span>
           <strong id="progressPercent">0%</strong>
         </div>
         <div class="progress-track">
@@ -75,57 +91,71 @@
       </div>
     </header>
 
-    <nav class="bottom-tabs surface-card" aria-label="Разделы приложения">
-      <button class="tab-btn active" data-tab="attendance" type="button">
-        <span class="tab-btn__icon" aria-hidden="true">✓</span>
-        <span>Посещение</span>
-      </button>
-      <button class="tab-btn" data-tab="students" type="button">
-        <span class="tab-btn__icon" aria-hidden="true">◎</span>
-        <span>Ученики</span>
-      </button>
-      <button class="tab-btn" data-tab="history" type="button">
-        <span class="tab-btn__icon" aria-hidden="true">◷</span>
-        <span>История</span>
-      </button>
-    </nav>
-
+    <!-- Основной контент по вкладкам -->
     <main class="main-content">
+      <!-- Панель 1: Посещение -->
       <section class="tab-panel active" id="panel-attendance" aria-labelledby="attendanceTitle">
         <section class="surface-card section-card">
           <div class="section-head">
             <div>
-              <p class="eyebrow">Рабочий день</p>
-              <h2 id="attendanceTitle">Отметки за день</h2>
-              <p id="attendanceHelp">Выберите дату, отметьте отсутствующих и сохраните журнал. Поиск и фильтры помогают быстро найти нужного ученика.</p>
+              <p class="eyebrow">Занятие</p>
+              <h2 id="attendanceTitle">Отметки посещения</h2>
+              <p id="attendanceHelp" class="section-desc">Укажите дату, отметьте отсутствующих и внесите изменения. Поиск поможет быстро ориентироваться.</p>
             </div>
             <div class="section-actions" id="attendanceActions">
-              <button class="secondary-btn" id="markAllPresentBtn" type="button">Все присутствуют</button>
-              <button class="primary-btn" id="saveBtn" type="button">Сохранить</button>
+              <button class="secondary-btn" id="markAllPresentBtn" type="button">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="btn-icon">
+                  <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/>
+                  <polyline points="22 4 12 14.01 9 11.01"/>
+                </svg>
+                Все были
+              </button>
+              <button class="primary-btn" id="saveBtn" type="button">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="btn-icon">
+                  <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/>
+                  <polyline points="17 21 17 13 7 13 7 21"/>
+                  <polyline points="7 3 7 8 15 8"/>
+                </svg>
+                Сохранить
+              </button>
             </div>
           </div>
 
           <div class="unsaved-banner hidden" id="unsavedBanner" role="status">
-            <span>Есть несохранённые изменения</span>
-            <button class="ghost-btn" id="saveBannerBtn" type="button">Сохранить сейчас</button>
+            <span class="banner-text-wrap">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="banner-icon">
+                <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+                <line x1="12" y1="9" x2="12" y2="13"/>
+                <line x1="12" y1="17" x2="12.01" y2="17"/>
+              </svg>
+              Внесены изменения. Не забудьте сохранить.
+            </span>
+            <button class="ghost-btn" id="saveBannerBtn" type="button">Сохранить</button>
           </div>
 
           <div class="lesson-note-card">
             <label class="field-label" for="lessonNoteInput">Комментарий к занятию</label>
-            <textarea id="lessonNoteInput" placeholder="Например: мастер-класс, праздник, короткое занятие, важное объявление"></textarea>
-            <div class="lesson-note-view" id="lessonNoteView">Комментарий к занятию не указан.</div>
+            <div class="textarea-wrapper">
+              <textarea id="lessonNoteInput" placeholder="Например: Тема 'Функции в JS', контрольная работа, открытый урок..."></textarea>
+            </div>
+            <div class="lesson-note-view" id="lessonNoteView">Комментарий отсутствует.</div>
           </div>
 
           <div class="smart-toolbar">
-            <label class="search-field" for="searchInput">
-              <span aria-hidden="true">⌕</span>
-              <input type="search" id="searchInput" placeholder="Поиск по имени" autocomplete="off">
-            </label>
+            <div class="search-field">
+              <span class="search-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                  <circle cx="11" cy="11" r="8"/>
+                  <line x1="21" y1="21" x2="16.65" y2="16.65"/>
+                </svg>
+              </span>
+              <input type="search" id="searchInput" placeholder="Поиск по имени ученика..." autocomplete="off">
+            </div>
 
-            <div class="filter-row" id="filterRow" aria-label="Фильтр посещения">
+            <div class="filter-row" id="filterRow" aria-label="Фильтрация списка">
               <button class="filter-chip active" data-filter="all" type="button">Все</button>
-              <button class="filter-chip" data-filter="absent" type="button">Отсутствующие</button>
               <button class="filter-chip" data-filter="present" type="button">Присутствующие</button>
+              <button class="filter-chip" data-filter="absent" type="button">Отсутствующие</button>
             </div>
           </div>
 
@@ -133,38 +163,61 @@
         </section>
       </section>
 
+      <!-- Панель 2: Ученики -->
       <section class="tab-panel" id="panel-students" aria-labelledby="studentsTitle">
         <section class="surface-card section-card">
           <div class="section-head section-head--single">
             <div>
-              <p class="eyebrow">Участники</p>
-              <h2 id="studentsTitle">Ученики</h2>
-              <p id="studentsHelp">Здесь виден общий список и накопительная статистика. Редактирование доступно только администраторам.</p>
+              <p class="eyebrow">База участников</p>
+              <h2 id="studentsTitle">Список учеников</h2>
+              <p id="studentsHelp" class="section-desc">Управление общим списком группы и статистика пропусков. Добавление учеников доступно администраторам.</p>
             </div>
           </div>
 
           <form class="add-student-form" id="addStudentForm" autocomplete="off">
-            <label class="search-field search-field--plain" for="newStudentName">
-              <span aria-hidden="true">＋</span>
-              <input type="text" id="newStudentName" placeholder="Имя нового ученика" maxlength="80">
-            </label>
-            <button class="primary-btn" id="addStudentBtn" type="submit">Добавить</button>
+            <div class="search-field search-field--plain">
+              <span class="search-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
+                  <circle cx="8.5" cy="7" r="4"/>
+                  <line x1="20" y1="8" x2="20" y2="14"/>
+                  <line x1="23" y1="11" x2="17" y2="11"/>
+                </svg>
+              </span>
+              <input type="text" id="newStudentName" placeholder="ФИО нового ученика" maxlength="80">
+            </div>
+            <button class="primary-btn" id="addStudentBtn" type="submit">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="btn-icon">
+                <line x1="12" y1="5" x2="12" y2="19"/>
+                <line x1="5" y1="12" x2="19" y2="12"/>
+              </svg>
+              Добавить
+            </button>
           </form>
 
           <div id="studentsAdminList" class="students-admin-list" aria-live="polite"></div>
         </section>
       </section>
 
+      <!-- Панель 3: История -->
       <section class="tab-panel" id="panel-history" aria-labelledby="historyTitle">
         <section class="surface-card section-card">
           <div class="section-head">
             <div>
-              <p class="eyebrow">Архив</p>
-              <h2 id="historyTitle">История сохранений</h2>
-              <p id="historyHelp">Откройте точный список, чтобы посмотреть присутствующих, отсутствующих и комментарий к занятию.</p>
+              <p class="eyebrow">База данных</p>
+              <h2 id="historyTitle">История изменений</h2>
+              <p id="historyHelp" class="section-desc">Список сохраненных журналов. Вы можете открыть детали любой даты или стереть локальный архив.</p>
             </div>
             <div class="section-actions" id="historyActions">
-              <button class="danger-btn" id="clearHistoryBtn" type="button">Очистить историю</button>
+              <button class="danger-btn" id="clearHistoryBtn" type="button">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="btn-icon">
+                  <polyline points="3 6 5 6 21 6"/>
+                  <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+                  <line x1="10" y1="11" x2="10" y2="17"/>
+                  <line x1="14" y1="11" x2="14" y2="17"/>
+                </svg>
+                Очистить
+              </button>
             </div>
           </div>
 
@@ -172,74 +225,128 @@
         </section>
       </section>
     </main>
+
+    <!-- Нижняя панель навигации (Sticky Tab Bar) -->
+    <nav class="bottom-tabs surface-card" aria-label="Разделы приложения">
+      <button class="tab-btn active" data-tab="attendance" type="button">
+        <span class="tab-btn__icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/>
+            <polyline points="22 4 12 14.01 9 11.01"/>
+          </svg>
+        </span>
+        <span>Журнал</span>
+      </button>
+      <button class="tab-btn" data-tab="students" type="button">
+        <span class="tab-btn__icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
+            <circle cx="9" cy="7" r="4"/>
+            <path d="M23 21v-2a4 4 0 0 0-3-3.87"/>
+            <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
+          </svg>
+        </span>
+        <span>Ученики</span>
+      </button>
+      <button class="tab-btn" data-tab="history" type="button">
+        <span class="tab-btn__icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="10"/>
+            <polyline points="12 6 12 12 16 14"/>
+          </svg>
+        </span>
+        <span>История</span>
+      </button>
+    </nav>
   </div>
 
+  <!-- Модальное окно 1: Указание причины отсутствия (Bottom Sheet) -->
   <div class="modal-overlay hidden" id="reasonModal" role="dialog" aria-modal="true" aria-labelledby="modalStudentName">
     <div class="modal-card bottom-sheet">
+      <div class="bottom-sheet-indicator" aria-hidden="true"></div>
       <div class="modal-header">
         <div>
           <p class="eyebrow">Причина отсутствия</p>
-          <h3 id="modalStudentName">Ученик</h3>
+          <h3 id="modalStudentName">Загрузка...</h3>
         </div>
-        <button class="icon-btn" id="closeModalBtn" type="button" aria-label="Закрыть">✕</button>
+        <button class="icon-btn modal-close-btn" id="closeModalBtn" type="button" aria-label="Закрыть">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="18" y1="6" x2="6" y2="18"/>
+            <line x1="6" y1="6" x2="18" y2="18"/>
+          </svg>
+        </button>
       </div>
 
       <div class="modal-body">
-        <label class="field-label" for="reasonSelect">Причина</label>
-        <select id="reasonSelect"></select>
+        <div class="reason-options-grid" id="reasonOptionsGrid" role="radiogroup" aria-label="Причина отсутствия">
+          <!-- Генерируется динамически через JS -->
+        </div>
 
-        <label class="field-label" for="reasonComment">Комментарий</label>
-        <textarea id="reasonComment" placeholder="Например: предупредили заранее, болеет, уехал(а)"></textarea>
+        <label class="field-label" for="reasonComment">Дополнительное примечание</label>
+        <div class="textarea-wrapper">
+          <textarea id="reasonComment" placeholder="Укажите подробности (например: предупредили заранее по телефону)"></textarea>
+        </div>
       </div>
 
       <div class="modal-actions">
-        <button class="secondary-btn" id="markPresentFromModalBtn" type="button">Вернуть в присутствующие</button>
-        <button class="primary-btn" id="saveReasonBtn" type="button">Сохранить причину</button>
+        <button class="secondary-btn" id="markPresentFromModalBtn" type="button">Ученик присутствует</button>
+        <button class="primary-btn" id="saveReasonBtn" type="button">Принять</button>
       </div>
     </div>
   </div>
 
+  <!-- Модальное окно 2: Детализация истории (Bottom Sheet) -->
   <div class="modal-overlay hidden" id="historyModal" role="dialog" aria-modal="true" aria-labelledby="historyModalTitle">
     <div class="modal-card history-modal-card bottom-sheet">
+      <div class="bottom-sheet-indicator" aria-hidden="true"></div>
       <div class="modal-header">
         <div>
-          <p class="eyebrow">Точный список</p>
+          <p class="eyebrow">Просмотр сохранения</p>
           <h3 id="historyModalTitle">Сохранение</h3>
         </div>
-        <button class="icon-btn" id="closeHistoryModalBtn" type="button" aria-label="Закрыть">✕</button>
+        <button class="icon-btn modal-close-btn" id="closeHistoryModalBtn" type="button" aria-label="Закрыть">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="18" y1="6" x2="6" y2="18"/>
+            <line x1="6" y1="6" x2="18" y2="18"/>
+          </svg>
+        </button>
       </div>
 
       <div class="modal-body history-modal-body" id="historyModalBody"></div>
     </div>
   </div>
 
+  <!-- Модальное окно 3: Подтверждение действий (Bottom Sheet) -->
   <div class="modal-overlay hidden" id="confirmModal" role="dialog" aria-modal="true" aria-labelledby="confirmTitle">
     <div class="modal-card confirm-card bottom-sheet">
+      <div class="bottom-sheet-indicator" aria-hidden="true"></div>
       <div class="modal-header">
         <div>
-          <p class="eyebrow">Подтверждение</p>
+          <p class="eyebrow">Системный запрос</p>
           <h3 id="confirmTitle">Подтвердите действие</h3>
         </div>
       </div>
       <div class="modal-body">
-        <p class="confirm-text" id="confirmText">Это действие нужно подтвердить.</p>
+        <p class="confirm-text" id="confirmText">Вы действительно хотите продолжить выполнение этой операции?</p>
       </div>
       <div class="modal-actions">
         <button class="secondary-btn" id="confirmCancelBtn" type="button">Отмена</button>
-        <button class="danger-btn" id="confirmAcceptBtn" type="button">Подтвердить</button>
+        <button class="danger-btn" id="confirmAcceptBtn" type="button">Продолжить</button>
       </div>
     </div>
   </div>
 
+  <!-- Полноэкранная заставка загрузки -->
   <div class="loading-overlay hidden" id="loadingOverlay" aria-live="polite" aria-busy="true">
     <div class="loader-card">
       <div class="spinner" aria-hidden="true"></div>
-      <p id="loadingText">Загрузка…</p>
+      <p id="loadingText">Загрузка данных...</p>
     </div>
   </div>
 
+  <!-- Уведомления (Toasts) -->
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
-  <script src="./app.js"></script>
+  <script src="./app.js" defer></script>
 </body>
 </html>
