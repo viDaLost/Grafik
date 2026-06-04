@@ -3,242 +3,188 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <meta name="color-scheme" content="light dark">
-  <meta name="theme-color" content="#101828">
   <title>Журнал посещения</title>
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
   <script src="./config.js"></script>
   <link rel="stylesheet" href="./styles.css">
 </head>
 <body>
-  <div class="app-bg" aria-hidden="true">
-    <span class="app-bg__orb app-bg__orb--one"></span>
-    <span class="app-bg__orb app-bg__orb--two"></span>
-    <span class="app-bg__grid"></span>
-  </div>
-
-  <div class="app-shell" id="appShell">
-    <header class="hero-card surface-card">
-      <div class="hero-card__top">
-        <div class="brand-lockup">
-          <div class="brand-mark" aria-hidden="true">
-            <svg viewBox="0 0 32 32" role="img" focusable="false">
-              <path d="M9.75 5.5h12.5A3.25 3.25 0 0 1 25.5 8.75v14.5a3.25 3.25 0 0 1-3.25 3.25H9.75A3.25 3.25 0 0 1 6.5 23.25V8.75A3.25 3.25 0 0 1 9.75 5.5Z" fill="currentColor" opacity=".16"/>
-              <path d="M11 11.25h10M11 16h10M11 20.75h6.25" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/>
-              <path d="M23.5 9.25 25.75 7" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/>
-            </svg>
-          </div>
-          <div>
-            <p class="eyebrow">Telegram Mini App</p>
-            <h1>Журнал посещения</h1>
-          </div>
+  <div class="app-shell">
+    
+    <!-- Компактная шапка -->
+    <header class="app-header">
+      <div class="header-main">
+        <div>
+          <span class="eyebrow">Журнал</span>
+          <h1 id="userBadge">Загрузка…</h1>
         </div>
-
-        <div class="user-stack">
-          <div class="status-chip" id="userBadge">Вход…</div>
-          <div class="mode-chip" id="modeBadge">Проверка доступа</div>
+        <div class="header-actions">
+          <button class="icon-btn info-trigger" id="infoBtn" aria-label="Справка">ℹ️</button>
         </div>
       </div>
 
-      <p class="hero-copy" id="accessNote">Загружаем журнал и проверяем права доступа.</p>
-
-      <section class="dashboard-grid" aria-label="Сводка за выбранный день">
-        <label class="date-card metric-card" for="lessonDate">
-          <span class="metric-label">Дата занятия</span>
-          <input type="date" id="lessonDate" autocomplete="off">
-        </label>
-
-        <div class="metric-card" aria-live="polite">
-          <span class="metric-label">Всего</span>
-          <strong class="metric-number" id="statTotal">0</strong>
+      <!-- Компактный навигатор по датам и краткая статистика -->
+      <div class="control-strip">
+        <div class="date-navigator">
+          <button id="prevDateBtn" class="date-nav-btn" aria-label="Предыдущий день">◀</button>
+          <div class="date-input-wrapper">
+            <input type="date" id="lessonDate">
+          </div>
+          <button id="nextDateBtn" class="date-nav-btn" aria-label="Следующий день">▶</button>
         </div>
 
-        <div class="metric-card metric-card--success" aria-live="polite">
-          <span class="metric-label">Были</span>
-          <strong class="metric-number" id="statPresent">0</strong>
-        </div>
-
-        <div class="metric-card metric-card--danger" aria-live="polite">
-          <span class="metric-label">Не были</span>
-          <strong class="metric-number" id="statAbsent">0</strong>
-        </div>
-      </section>
-
-      <div class="progress-card" aria-label="Прогресс посещения">
-        <div class="progress-card__head">
-          <span id="progressLabel">Посещение не рассчитано</span>
-          <strong id="progressPercent">0%</strong>
-        </div>
-        <div class="progress-track">
-          <span class="progress-fill" id="attendanceProgress"></span>
+        <div class="mini-stats">
+          <div class="mini-stat-item">
+            <span class="label">Всего</span>
+            <strong id="statTotal">0</strong>
+          </div>
+          <div class="mini-stat-item success">
+            <span class="label">Были</span>
+            <strong id="statPresent">0</strong>
+          </div>
+          <div class="mini-stat-item danger">
+            <span class="label">Пропуски</span>
+            <strong id="statAbsent">0</strong>
+          </div>
         </div>
       </div>
+
+      <div class="access-note hidden" id="accessNote">Проверяем права доступа…</div>
     </header>
 
-    <nav class="bottom-tabs surface-card" aria-label="Разделы приложения">
-      <button class="tab-btn active" data-tab="attendance" type="button">
-        <span class="tab-btn__icon" aria-hidden="true">✓</span>
-        <span>Посещение</span>
-      </button>
-      <button class="tab-btn" data-tab="students" type="button">
-        <span class="tab-btn__icon" aria-hidden="true">◎</span>
-        <span>Ученики</span>
-      </button>
-      <button class="tab-btn" data-tab="history" type="button">
-        <span class="tab-btn__icon" aria-hidden="true">◷</span>
-        <span>История</span>
-      </button>
-    </nav>
-
-    <main class="main-content">
-      <section class="tab-panel active" id="panel-attendance" aria-labelledby="attendanceTitle">
-        <section class="surface-card section-card">
-          <div class="section-head">
-            <div>
-              <p class="eyebrow">Рабочий день</p>
-              <h2 id="attendanceTitle">Отметки за день</h2>
-              <p id="attendanceHelp">Выберите дату, отметьте отсутствующих и сохраните журнал. Поиск и фильтры помогают быстро найти нужного ученика.</p>
-            </div>
-            <div class="section-actions" id="attendanceActions">
-              <button class="secondary-btn" id="markAllPresentBtn" type="button">Все присутствуют</button>
-              <button class="primary-btn" id="saveBtn" type="button">Сохранить</button>
-            </div>
+    <!-- Основной контент -->
+    <main class="app-content">
+      
+      <!-- ВКЛАДКА: ПОСЕЩЕНИЕ -->
+      <section class="tab-panel active" id="panel-attendance">
+        <!-- Поиск и фильтры -->
+        <div class="search-filter-sticky">
+          <div class="search-bar">
+            <input type="search" id="searchInput" placeholder="Поиск ученика…">
           </div>
-
-          <div class="unsaved-banner hidden" id="unsavedBanner" role="status">
-            <span>Есть несохранённые изменения</span>
-            <button class="ghost-btn" id="saveBannerBtn" type="button">Сохранить сейчас</button>
+          <div class="filter-chips-scroll" id="filterRow">
+            <button class="filter-chip active" data-filter="all">Все</button>
+            <button class="filter-chip present" data-filter="present">Присутствующие</button>
+            <button class="filter-chip absent" data-filter="absent">Отсутствующие</button>
           </div>
+        </div>
 
-          <div class="lesson-note-card">
-            <label class="field-label" for="lessonNoteInput">Комментарий к занятию</label>
-            <textarea id="lessonNoteInput" placeholder="Например: мастер-класс, праздник, короткое занятие, важное объявление"></textarea>
-            <div class="lesson-note-view" id="lessonNoteView">Комментарий к занятию не указан.</div>
-          </div>
+        <div class="action-bar">
+          <button class="ghost-btn" id="markAllPresentBtn">✅ Отметить всех</button>
+          <button class="primary-btn save-action-btn" id="saveBtn">Сохранить журнал</button>
+        </div>
 
-          <div class="smart-toolbar">
-            <label class="search-field" for="searchInput">
-              <span aria-hidden="true">⌕</span>
-              <input type="search" id="searchInput" placeholder="Поиск по имени" autocomplete="off">
-            </label>
+        <!-- Поле заметки к уроку -->
+        <div class="lesson-note-box">
+          <textarea id="lessonNoteInput" placeholder="Добавить тему или заметку к уроку…"></textarea>
+          <div class="lesson-note-view hidden" id="lessonNoteView"></div>
+        </div>
 
-            <div class="filter-row" id="filterRow" aria-label="Фильтр посещения">
-              <button class="filter-chip active" data-filter="all" type="button">Все</button>
-              <button class="filter-chip" data-filter="absent" type="button">Отсутствующие</button>
-              <button class="filter-chip" data-filter="present" type="button">Присутствующие</button>
-            </div>
-          </div>
-
-          <div id="studentsList" class="attendance-list" aria-live="polite"></div>
-        </section>
+        <div class="panel-info-alert" id="attendanceHelp">Отмечайте посещение за выбранную дату.</div>
+        
+        <!-- Список студентов для отметки -->
+        <div id="studentsList" class="attendance-list"></div>
       </section>
 
-      <section class="tab-panel" id="panel-students" aria-labelledby="studentsTitle">
-        <section class="surface-card section-card">
-          <div class="section-head section-head--single">
-            <div>
-              <p class="eyebrow">Участники</p>
-              <h2 id="studentsTitle">Ученики</h2>
-              <p id="studentsHelp">Здесь виден общий список и накопительная статистика. Редактирование доступно только администраторам.</p>
-            </div>
-          </div>
+      <!-- ВКЛАДКА: УЧЕНИКИ -->
+      <section class="tab-panel" id="panel-students">
+        <div class="panel-info-alert" id="studentsHelp">Список учеников и статистика посещаемости.</div>
+        
+        <!-- Добавление нового студента -->
+        <div class="add-student-card">
+          <input type="text" id="newStudentName" placeholder="ФИО нового ученика">
+          <button class="primary-btn compact" id="addStudentBtn">Добавить</button>
+        </div>
 
-          <form class="add-student-form" id="addStudentForm" autocomplete="off">
-            <label class="search-field search-field--plain" for="newStudentName">
-              <span aria-hidden="true">＋</span>
-              <input type="text" id="newStudentName" placeholder="Имя нового ученика" maxlength="80">
-            </label>
-            <button class="primary-btn" id="addStudentBtn" type="submit">Добавить</button>
-          </form>
-
-          <div id="studentsAdminList" class="students-admin-list" aria-live="polite"></div>
-        </section>
+        <div id="studentsAdminList" class="students-admin-list"></div>
       </section>
 
-      <section class="tab-panel" id="panel-history" aria-labelledby="historyTitle">
-        <section class="surface-card section-card">
-          <div class="section-head">
-            <div>
-              <p class="eyebrow">Архив</p>
-              <h2 id="historyTitle">История сохранений</h2>
-              <p id="historyHelp">Откройте точный список, чтобы посмотреть присутствующих, отсутствующих и комментарий к занятию.</p>
-            </div>
-            <div class="section-actions" id="historyActions">
-              <button class="danger-btn" id="clearHistoryBtn" type="button">Очистить историю</button>
-            </div>
-          </div>
+      <!-- ВКЛАДКА: ИСТОРИЯ -->
+      <section class="tab-panel" id="panel-history">
+        <div class="panel-info-alert" id="historyHelp">История всех сохранений по датам.</div>
+        
+        <div class="history-actions-header">
+          <button class="danger-btn text-only" id="clearHistoryBtn">⚠️ Очистить всю историю</button>
+        </div>
 
-          <div id="historyList" class="history-list" aria-live="polite"></div>
-        </section>
+        <div id="historyList" class="history-list"></div>
       </section>
     </main>
+
+    <!-- Нижняя навигационная панель (Bottom Navigation) -->
+    <nav class="bottom-nav">
+      <button class="bottom-nav-btn active" data-tab="attendance">
+        <span class="icon">📝</span>
+        <span class="label">Журнал</span>
+      </button>
+      <button class="bottom-nav-btn" data-tab="students">
+        <span class="icon">👥</span>
+        <span class="label">Ученики</span>
+      </button>
+      <button class="bottom-nav-btn" data-tab="history">
+        <span class="icon">🕒</span>
+        <span class="label">История</span>
+      </button>
+    </nav>
   </div>
 
-  <div class="modal-overlay hidden" id="reasonModal" role="dialog" aria-modal="true" aria-labelledby="modalStudentName">
-    <div class="modal-card bottom-sheet">
+  <!-- Шторка снизу: Причина отсутствия (Bottom Sheet) -->
+  <div class="modal-overlay hidden" id="reasonModal">
+    <div class="bottom-sheet">
+      <div class="sheet-drag-handle"></div>
       <div class="modal-header">
         <div>
-          <p class="eyebrow">Причина отсутствия</p>
+          <div class="eyebrow">Причина отсутствия</div>
           <h3 id="modalStudentName">Ученик</h3>
         </div>
-        <button class="icon-btn" id="closeModalBtn" type="button" aria-label="Закрыть">✕</button>
+        <button class="close-sheet-btn" id="closeModalBtn" aria-label="Закрыть">✕</button>
       </div>
 
       <div class="modal-body">
-        <label class="field-label" for="reasonSelect">Причина</label>
-        <select id="reasonSelect"></select>
+        <div class="form-group">
+          <label class="field-label" for="reasonSelect">Выберите причину</label>
+          <select id="reasonSelect"></select>
+        </div>
 
-        <label class="field-label" for="reasonComment">Комментарий</label>
-        <textarea id="reasonComment" placeholder="Например: предупредили заранее, болеет, уехал(а)"></textarea>
+        <div class="form-group">
+          <label class="field-label" for="reasonComment">Комментарий</label>
+          <textarea id="reasonComment" placeholder="Дополнительные детали…"></textarea>
+        </div>
       </div>
 
-      <div class="modal-actions">
-        <button class="secondary-btn" id="markPresentFromModalBtn" type="button">Вернуть в присутствующие</button>
-        <button class="primary-btn" id="saveReasonBtn" type="button">Сохранить причину</button>
+      <div class="modal-actions-sheet">
+        <button class="secondary-btn" id="markPresentFromModalBtn">Был(а)</button>
+        <button class="primary-btn" id="saveReasonBtn">Сохранить</button>
       </div>
     </div>
   </div>
 
-  <div class="modal-overlay hidden" id="historyModal" role="dialog" aria-modal="true" aria-labelledby="historyModalTitle">
-    <div class="modal-card history-modal-card bottom-sheet">
+  <!-- Шторка снизу: Точный список (Bottom Sheet) -->
+  <div class="modal-overlay hidden" id="historyModal">
+    <div class="bottom-sheet history-sheet">
+      <div class="sheet-drag-handle"></div>
       <div class="modal-header">
         <div>
-          <p class="eyebrow">Точный список</p>
+          <div class="eyebrow">Детали занятия</div>
           <h3 id="historyModalTitle">Сохранение</h3>
         </div>
-        <button class="icon-btn" id="closeHistoryModalBtn" type="button" aria-label="Закрыть">✕</button>
+        <button class="close-sheet-btn" id="closeHistoryModalBtn" aria-label="Закрыть">✕</button>
       </div>
 
       <div class="modal-body history-modal-body" id="historyModalBody"></div>
     </div>
   </div>
 
-  <div class="modal-overlay hidden" id="confirmModal" role="dialog" aria-modal="true" aria-labelledby="confirmTitle">
-    <div class="modal-card confirm-card bottom-sheet">
-      <div class="modal-header">
-        <div>
-          <p class="eyebrow">Подтверждение</p>
-          <h3 id="confirmTitle">Подтвердите действие</h3>
-        </div>
-      </div>
-      <div class="modal-body">
-        <p class="confirm-text" id="confirmText">Это действие нужно подтвердить.</p>
-      </div>
-      <div class="modal-actions">
-        <button class="secondary-btn" id="confirmCancelBtn" type="button">Отмена</button>
-        <button class="danger-btn" id="confirmAcceptBtn" type="button">Подтвердить</button>
-      </div>
-    </div>
-  </div>
-
-  <div class="loading-overlay hidden" id="loadingOverlay" aria-live="polite" aria-busy="true">
+  <!-- Лоадер -->
+  <div class="loading-overlay hidden" id="loadingOverlay">
     <div class="loader-card">
-      <div class="spinner" aria-hidden="true"></div>
+      <div class="spinner"></div>
       <p id="loadingText">Загрузка…</p>
     </div>
   </div>
 
-  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+  <!-- Тосты -->
+  <div class="toast" id="toast"></div>
 
   <script src="./app.js"></script>
 </body>
